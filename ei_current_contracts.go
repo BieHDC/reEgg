@@ -1,12 +1,10 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
-	"io"
 	"log"
 	"math"
-	"os"
-	"path/filepath"
 	"time"
 
 	ei "biehdc.reegg/eggpb"
@@ -89,21 +87,13 @@ var (
 	permanent          []*ei.Contract
 )
 
-func generateContracts(workingpath string) {
-	joined := filepath.Join(workingpath, "contracts_go.json")
-	contractsfile, err := os.Open(joined)
-	if err != nil {
-		log.Panic(err)
-	}
-	defer contractsfile.Close()
-	bytes, err := io.ReadAll(contractsfile)
-	if err != nil {
-		log.Panic(err)
-	}
+//go:embed contracts_go.json
+var contracts_json []byte
 
+func generateContracts(workingpath string) {
 	var contracts []*ei.Contract
 	// lets hope this works
-	err = json.Unmarshal(bytes, &contracts)
+	err := json.Unmarshal(contracts_json, &contracts)
 	if err != nil {
 		log.Panic(err)
 	}
