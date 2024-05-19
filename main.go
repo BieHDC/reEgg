@@ -123,7 +123,7 @@ func loadConfig(userdir string) (Config, string) {
 				log.Panic(err)
 			}
 			emptyconfig := Config{
-				Motd: "WELCOME TO GO-REEGG!!\nA custom server!!",
+				Motd: "WELCOME TO reEgg-go!!\nA custom server!!",
 			}
 			encoder := json.NewEncoder(serversettingsfile)
 			encoder.SetIndent("", "\t")
