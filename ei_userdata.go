@@ -159,7 +159,7 @@ func (egg *eggstore) path_user_data_info(decoded []byte) []byte {
 
 	udiresp := ei.UserDataInfoResponse{
 		BackupChecksum:  backup.Checksum,
-		BackupTotalCash: backup.Game.PrestigeCashEarned, // i guess thats it?
+		BackupTotalCash: backup.Game.LifetimeCashEarned,
 		CoopMemberships: []string{"Golang rocks!"}, // fixme this is for later
 	}
 
