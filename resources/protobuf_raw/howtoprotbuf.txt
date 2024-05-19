@@ -1,0 +1,7 @@
+add this to all .proto files (its easier that way)
+option go_package = "biehdc.reegg/ei";
+
+then run
+protoc -Iprotobuf_raw/ protobuf_raw/abb.proto protobuf_raw/common.proto protobuf_raw/ei.proto --go_out=eggpb
+
+then put the generates files into the correct places (see existing)
