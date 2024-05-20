@@ -45,13 +45,13 @@ func (egg *eggstore) path_first_contact(decoded []byte) []byte {
 	var exists bool
 	backup, exists = egg.users.Load(*fcreq.UserId)
 	if exists {
-		log.Println("user has a hot savegame, returning it")
+		//log.Println("user has a hot savegame, returning it")
 	} else {
 		backup = egg.backupFromFile(*fcreq.UserId)
 		if backup == nil {
 			log.Println("no savegave for user")
 		} else {
-			log.Println("loaded cold savegave for user")
+			//log.Println("loaded cold savegave for user")
 			egg.users.Store(*fcreq.UserId, backup)
 		}
 	}
@@ -160,7 +160,7 @@ func (egg *eggstore) path_user_data_info(decoded []byte) []byte {
 	udiresp := ei.UserDataInfoResponse{
 		BackupChecksum:  backup.Checksum,
 		BackupTotalCash: backup.Game.LifetimeCashEarned,
-		CoopMemberships: []string{"Golang rocks!"}, // fixme this is for later
+		CoopMemberships: getCoopMemberships(*udireq.UserId),
 	}
 
 	resp, err := proto.Marshal(&udiresp)

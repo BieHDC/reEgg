@@ -77,15 +77,97 @@ var permacontract *ei.Contract = func() *ei.Contract {
 	return &firstcontract
 }()
 
+// Just a dupe of the other one, for quick testing
+var permacontractCoop *ei.Contract = func() *ei.Contract {
+	var (
+		ident         = "first-contract-coop"
+		name          = "Your First Contract Coop"
+		desc          = "We heard you are open to contract work! Help fill this order from the local pharmacy!"
+		egg_          = ei.Egg_MEDICAL
+		lensecs       = 14400.0
+		tokeninterval = 5.0
+		exptime       = 100000000.0
+		maxsouleggs   = 5000.0
+	)
+	var (
+		rwtype1     = ei.RewardType_GOLD
+		rwamount1   = 500.0
+		rwamount1_2 = 192.0
+		delamount1  = 100000.0
+		rwtype2     = ei.RewardType_PIGGY_FILL
+		rwamount2   = 10000.0
+		delamount2  = 5000000000.0
+	)
+	var (
+		coopallowed = true
+		maxcoop     = uint32(4)
+	)
+	firstcontract := ei.Contract{
+		Identifier:      &ident,
+		Name:            &name,
+		Description:     &desc,
+		LengthSeconds:   &lensecs,
+		Egg:             &egg_,
+		MinutesPerToken: &tokeninterval,
+		ExpirationTime:  &exptime,
+		MaxSoulEggs:     &maxsouleggs,
+		CoopAllowed:     &coopallowed,
+		MaxCoopSize:     &maxcoop,
+		GoalSets: []*ei.Contract_GoalSet{
+			{
+				Goals: []*ei.Contract_Goal{
+					{
+						RewardType:   &rwtype1,
+						RewardAmount: &rwamount1,
+						TargetAmount: &delamount1,
+					},
+					{
+						RewardType:   &rwtype2,
+						RewardAmount: &rwamount2,
+						TargetAmount: &delamount2,
+					},
+				},
+			},
+			{
+				Goals: []*ei.Contract_Goal{
+					{
+						RewardType:   &rwtype1,
+						RewardAmount: &rwamount1_2,
+						TargetAmount: &delamount1,
+					},
+					{
+						RewardType:   &rwtype2,
+						RewardAmount: &rwamount2,
+						TargetAmount: &delamount2,
+					},
+				},
+			},
+		},
+	}
+	return &firstcontract
+}()
+
 const _7days = float64(604800) // seconds
 const _4days = float64(345600) // seconds
 var (
-	ALL_SOLO_CONTRACTS = true //fixme: TODO: Co-op contracts, toggle this off when we have them
+	ALL_SOLO_CONTRACTS = false // keeping around in case we unset it again
 	contractEpoch      = 1714867200
 	legacy             []*ei.Contract
 	normal             []*ei.Contract
 	permanent          []*ei.Contract
 )
+
+func getContract(identifier string) *ei.Contract {
+	if *permacontractCoop.Identifier == identifier {
+		return permacontract
+	}
+	for _, ct := range legacy {
+		if *ct.Identifier == identifier {
+			return ct
+		}
+	}
+	return nil
+}
 
 //go:embed contracts_go.json
 var contracts_json []byte
@@ -98,7 +180,7 @@ func generateContracts(workingpath string) {
 		log.Panic(err)
 	}
 
-	permanent = append(permanent, permacontract)
+	permanent = []*ei.Contract{permacontract, permacontractCoop}
 
 	const scaler = float64(1.0)
 	tmpbool := false

@@ -20,7 +20,7 @@ func (egg *eggstore) serverGifts(pr *ei.GetPeriodicalsRequest) []*ei.ServerGift 
 	backup, _ := egg.users.Load(*pr.UserId)
 	gift := serverGiftEarningsboost(backup)
 	if gift != nil {
-		log.Printf("user %s is getting free money: %f", *pr.UserId, *gift.RewardAmount)
+		//log.Printf("user %s is getting free money: %f", *pr.UserId, *gift.RewardAmount)
 		pending = append(pending, gift)
 	}
 

@@ -82,6 +82,24 @@ func (egg *eggstore) handlepath_ei(w http.ResponseWriter, req *http.Request) err
 	case "get_contracts":
 		resp = egg.path_get_contracts(decoded)
 
+	// coop stuff
+	case "query_coop":
+		resp = egg.path_query_coop(decoded)
+	case "create_coop":
+		resp = egg.path_create_coop(decoded)
+	case "coop_status":
+		resp = egg.path_coop_status(decoded)
+	case "update_coop_status":
+		resp = egg.path_update_coop_status(decoded)
+	case "join_coop":
+		resp = egg.path_join_coop(decoded)
+	case "auto_join_coop":
+		resp = egg.path_auto_join_coop(decoded)
+	case "leave_coop":
+		resp = egg.path_leave_coop(decoded)
+	case "update_coop_permissions":
+		resp = egg.path_update_coop_permissions(decoded)
+
 	//misc stuff
 	case "get_ad_config":
 		//noop and ignored

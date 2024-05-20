@@ -17,8 +17,8 @@ The other reasons see the blogpost.
 - Play the game. It will incrementally unlock customised stuff.
 
 ## OG Roadmap
-- [ ] First contact
-  - [ ] Offer a valid backup
+- [x] First contact
+  - [x] Offer a valid backup
   - [x] Respond with valid payload
   - [x] Unlock Pro Permit
 - [x] Gift Calendar
@@ -30,7 +30,10 @@ The other reasons see the blogpost.
   - [ ] Contracts
     - [x] Your First Contract
     - [x] Contract Scheduler
-    - [ ] Co-op with computer simulations
+    - [x] Basic Co-op
+      - [ ] Persistence (your client will be very unhappy)
+      - [ ] Fixing all the dataraces
+      - [ ] Computer Simulations
   - [x] Events
     - [x] Proof of Concept
     - [x] Event Scheduler
@@ -45,7 +48,7 @@ The other reasons see the blogpost.
   - [ ] Admin interface
   - [ ] Server Federation
 - [ ] Periodicals
-  - [ ] Random Gifts from Server (partially implemented, money drop)
+  - [x] Random Gift from Server
   - [x] Good Morning message (on first_contact)
 
 ## DISCLAIMER
