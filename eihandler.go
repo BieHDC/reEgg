@@ -95,6 +95,8 @@ func (egg *eggstore) handlepath_ei(w http.ResponseWriter, req *http.Request) err
 		resp = egg.path_leave_coop(decoded)
 	case "update_coop_permissions":
 		resp = egg.path_update_coop_permissions(decoded)
+	case "gift_player_coop":
+		resp = egg.path_gift_player_coop(decoded)
 
 	//misc stuff
 	case "get_ad_config":
