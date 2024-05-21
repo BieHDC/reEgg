@@ -65,20 +65,16 @@ func (egg *eggstore) handlepath_ei(w http.ResponseWriter, req *http.Request) err
 	// userdata stuff
 	case "first_contact":
 		resp = egg.path_first_contact(decoded)
-
 	case "save_backup":
 		resp = egg.path_save_backup(decoded)
-
 	case "user_data_info":
 		resp = egg.path_user_data_info(decoded)
 
 	// gameplay stuff
 	case "get_periodicals":
 		resp = egg.path_get_periodicals(decoded)
-
 	case "daily_gift_info":
 		resp = path_daily_gift_info(decoded)
-
 	case "get_contracts":
 		resp = egg.path_get_contracts(decoded)
 
