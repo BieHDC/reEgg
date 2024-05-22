@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"log"
 	"slices"
 	"time"
@@ -160,6 +162,7 @@ type usermemberinfo struct {
 	Deviceid    string
 	CoopName    string
 	DisplayName string
+	PrivacyId   string
 }
 
 var members = lockmap.MakeLockMap[string, []usermemberinfo]()
@@ -205,6 +208,24 @@ func isPlayerInCoop(userid string, groupname string) bool {
 	}
 
 	return false
+}
+
+func calculatePrivacyId(deviceid string) string {
+	sha := sha256.Sum256([]byte(deviceid))
+	return fmt.Sprintf("%x", sha[8:16])
+}
+
+// also implicitly confirms the player is in the lobby
+func deviceIdFromPrivacyId(coopname, privacyid string) string {
+	members := getMembersInGroup(coopname)
+
+	for _, member := range members {
+		if member.PrivacyId == privacyid {
+			return member.Deviceid
+		}
+	}
+
+	return ""
 }
 
 type contractGame struct {
@@ -364,6 +385,7 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 		Deviceid:    *req.UserId,
 		CoopName:    *req.CoopIdentifier,
 		DisplayName: *req.UserName,
+		PrivacyId:   calculatePrivacyId(*req.UserId),
 	}))
 
 	// great success
@@ -419,7 +441,13 @@ func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusRespons
 	}
 
 	resp.Public = &lobby.Public
-	resp.CreatorId = &lobby.Owner
+	if lobby.Owner == *req.UserId {
+		// do not obfuscate ourselves to ourselves
+		resp.CreatorId = &lobby.Owner
+	} else {
+		privacyid := calculatePrivacyId(lobby.Owner)
+		resp.CreatorId = &privacyid
+	}
 	stamp := time.Now().Unix()
 	rem := lobby.Stamp + *contract.LengthSeconds - float64(stamp)
 	resp.SecondsRemaining = &rem
@@ -427,7 +455,12 @@ func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusRespons
 	members := getMembersInGroup(*req.CoopIdentifier)
 	for _, member := range members {
 		contr := ei.ContractCoopStatusResponse_ContributionInfo{}
-		contr.UserId = &member.Deviceid
+		// do not obfuscate ourselves to ourselves
+		if member.Deviceid == *req.UserId {
+			contr.UserId = &member.Deviceid
+		} else {
+			contr.UserId = &member.PrivacyId
+		}
 		contr.UserName = &member.DisplayName
 
 		status, exists := coopstatus.Load(member.Deviceid)
@@ -567,6 +600,7 @@ func joinCoop2(req *ei.JoinCoopRequest, lobby contractGame) *ei.JoinCoopResponse
 		Deviceid:    *req.UserId,
 		CoopName:    coopIdentifier,
 		DisplayName: *req.UserName,
+		PrivacyId:   calculatePrivacyId(*req.UserId),
 	}))
 
 	// success
@@ -728,22 +762,30 @@ func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 		return []byte(failed)
 	}
 
-	// check if receiver is in the same coop
-	if !isPlayerInCoop(*req.PlayerIdentifier, *req.CoopIdentifier) {
+	// deobfuscate deviceid
+	realdeviceid := deviceIdFromPrivacyId(*req.CoopIdentifier, *req.PlayerIdentifier)
+	if realdeviceid == "" {
 		failed = "Receiver not in Group"
 		return []byte(failed)
 	}
 
+	// check if receiver is in the same coop (confirmed by deviceIdFromPrivacyId already)
+	//if !isPlayerInCoop(*req.PlayerIdentifier, *req.CoopIdentifier) {
+	//	failed = "Receiver not in Group"
+	//	return []byte(failed)
+	//}
+
+	senderprivacyid := calculatePrivacyId(*req.RequestingUserId)
 	// insert gift into giftmap
 	gift := ei.ContractCoopStatusResponse_CoopGift{
-		UserId:   req.RequestingUserId,
+		UserId:   &senderprivacyid,
 		UserName: req.RequestingUserName,
 		Amount:   req.Amount,
 	}
 
-	currentgifts, _ := coopgifts.LockAndLoad(*req.PlayerIdentifier)
+	currentgifts, _ := coopgifts.LockAndLoad(realdeviceid)
 	currentgifts = append(currentgifts, &gift)
-	coopgifts.StoreAndUnlock(*req.PlayerIdentifier, currentgifts)
+	coopgifts.StoreAndUnlock(realdeviceid, currentgifts)
 
 	return []byte("Chuck") // it should expect nothing in response
 }
@@ -794,17 +836,24 @@ func kickPlayerCoop(req *ei.KickPlayerCoopRequest) []byte {
 		return []byte(failed)
 	}
 
-	// check if receiver is in the same coop
-	if !isPlayerInCoop(*req.PlayerIdentifier, *req.CoopIdentifier) {
+	// deobfuscate deviceid
+	realdeviceid := deviceIdFromPrivacyId(*req.CoopIdentifier, *req.PlayerIdentifier)
+	if realdeviceid == "" {
 		failed = "Receiver not in Group"
 		return []byte(failed)
 	}
+
+	// check if receiver is in the same coop (confirmed by deviceIdFromPrivacyId already)
+	//if !isPlayerInCoop(*req.PlayerIdentifier, *req.CoopIdentifier) {
+	//	failed = "Receiver not in Group"
+	//	return []byte(failed)
+	//}
 
 	// make the kicked player leave
 	return leaveCoop(&ei.LeaveCoopRequest{
 		ContractIdentifier: req.ContractIdentifier,
 		CoopIdentifier:     req.CoopIdentifier,
-		PlayerIdentifier:   req.PlayerIdentifier,
+		PlayerIdentifier:   &realdeviceid,
 		ClientVersion:      req.ClientVersion,
 	})
 }

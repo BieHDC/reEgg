@@ -33,7 +33,6 @@ The other reasons see the blogpost.
     - [x] Basic Co-op
       - [ ] Persistence (your client will be very unhappy)
       - [ ] Change Displayname (abuse coop contract farm?)
-      - [ ] User ID protection and privacy obfuscations
       - [ ] Computer Simulations
   - [x] Events
     - [x] Proof of Concept
