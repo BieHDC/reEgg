@@ -159,7 +159,7 @@ var (
 
 func getContract(identifier string) *ei.Contract {
 	if *permacontractCoop.Identifier == identifier {
-		return permacontract
+		return permacontractCoop
 	}
 	for _, ct := range legacy {
 		if *ct.Identifier == identifier {
