@@ -145,6 +145,17 @@ func (egg *eggstore) path_gift_player_coop(decoded []byte) []byte {
 	return giftPlayerCoop(&req)
 }
 
+func (egg *eggstore) path_kick_player_coop(decoded []byte) []byte {
+	req := ei.KickPlayerCoopRequest{}
+	err := proto.Unmarshal(decoded, &req)
+	if err != nil {
+		log.Printf("cant unmarshal KickPlayerCoopRequest: %s", err)
+		return nil
+	}
+
+	return kickPlayerCoop(&req)
+}
+
 type usermemberinfo struct {
 	Deviceid    string
 	CoopName    string
@@ -735,4 +746,65 @@ func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 	coopgifts.StoreAndUnlock(*req.PlayerIdentifier, currentgifts)
 
 	return []byte("Chuck") // it should expect nothing in response
+}
+
+func kickPlayerCoop(req *ei.KickPlayerCoopRequest) []byte {
+	failed := ""
+	/*
+		defer func() {
+			if failed != "" {
+				log.Printf("kickPlayerCoop failed: %s", failed)
+				log.Printf("kickPlayerCoop Req: %s", req.String())
+				log.Printf("kickPlayerCoop Resp: None")
+			}
+		}()
+	*/
+
+	// RequestingUserId sender
+	// PlayerIdentifier receiver
+
+	// check if lobby exists
+	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	if !exists {
+		failed = "Coop not fouund"
+		return []byte(failed)
+	}
+
+	// check if sender is owner of the lobby
+	if lobby.Owner != *req.RequestingUserId {
+		failed = "only the owner is allowed to kick"
+		return []byte(failed)
+	}
+
+	// check if coop and contract match
+	if lobby.ContractIdentifier != *req.ContractIdentifier {
+		failed = "contract identifier mismatch"
+		return []byte(failed)
+	}
+
+	contract := getContract(*req.ContractIdentifier)
+	if contract == nil {
+		failed = "Contract not found"
+		return []byte(failed)
+	}
+
+	// check if sender is in a coop
+	if !isPlayerInCoop(*req.RequestingUserId, *req.CoopIdentifier) {
+		failed = "Sender not in Group"
+		return []byte(failed)
+	}
+
+	// check if receiver is in the same coop
+	if !isPlayerInCoop(*req.PlayerIdentifier, *req.CoopIdentifier) {
+		failed = "Receiver not in Group"
+		return []byte(failed)
+	}
+
+	// make the kicked player leave
+	return leaveCoop(&ei.LeaveCoopRequest{
+		ContractIdentifier: req.ContractIdentifier,
+		CoopIdentifier:     req.CoopIdentifier,
+		PlayerIdentifier:   req.PlayerIdentifier,
+		ClientVersion:      req.ClientVersion,
+	})
 }
