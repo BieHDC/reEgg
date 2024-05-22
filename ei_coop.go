@@ -7,6 +7,7 @@ import (
 
 	ei "biehdc.reegg/eggpb"
 	genericsync "biehdc.reegg/genericsyncmap"
+	"biehdc.reegg/lockmap"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -148,15 +149,14 @@ type usermemberinfo struct {
 	Deviceid    string
 	CoopName    string
 	DisplayName string
-	LastVisit   int64
 }
 
-var members genericsync.Map[string, []usermemberinfo]
+var members = lockmap.MakeLockMap[string, []usermemberinfo]()
 
 func getMembersInGroup(coopname string) []usermemberinfo {
 	var membersingroup []usermemberinfo
 
-	members.Range(func(k string, v []usermemberinfo) bool {
+	members.LockedRange(func(k string, v []usermemberinfo) bool {
 		for _, mi := range v {
 			if mi.CoopName == coopname {
 				membersingroup = append(membersingroup, mi)
@@ -176,7 +176,7 @@ func countMembersInGroup(coopname string) int {
 func getCoopMemberships(userid string) []string {
 	var memberships []string
 
-	userinfo, _ := members.Load(userid)
+	userinfo, _ := members.LockedLoad(userid)
 	for _, ui := range userinfo {
 		memberships = append(memberships, ui.CoopName)
 	}
@@ -205,11 +205,16 @@ type contractGame struct {
 	Public             bool
 }
 
-var coopgames genericsync.Map[string, *contractGame]
+var coopgames = lockmap.MakeLockMap[string, contractGame]()
 
-var coopgifts genericsync.Map[string, []*ei.ContractCoopStatusResponse_CoopGift]
+var coopgifts = lockmap.MakeLockMap[string, []*ei.ContractCoopStatusResponse_CoopGift]()
 
-var coopstatus genericsync.Map[string, *ei.ContractCoopStatusUpdateRequest]
+type coopStatusEx struct {
+	lastvisit int64
+	ccsur     *ei.ContractCoopStatusUpdateRequest
+}
+
+var coopstatus genericsync.Map[string, coopStatusEx]
 
 func queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 	var (
@@ -240,8 +245,8 @@ func queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 		return &resp
 	}
 
-	lobby, _ := coopgames.Load(*req.CoopIdentifier)
-	if lobby == nil {
+	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	if !exists {
 		//failed = "no lobby"
 		return &resp
 	}
@@ -306,14 +311,6 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 		return &resp
 	}
 
-	// check if the group name is already used -> reject
-	_, exists := coopgames.Load(*req.CoopIdentifier)
-	if exists {
-		//failed = "-"
-		message = "This name is already taken"
-		return &resp
-	}
-
 	if req.ContractIdentifier == nil {
 		//failed = "-"
 		message = "Bad Contract Identifier"
@@ -332,8 +329,16 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 	// calc how much time remeaning for it
 	stamp := float64(now) - *contract.LengthSeconds + *req.SecondsRemaining
 
+	// check if the group name is already used -> reject
+	_, exists := coopgames.LockAndLoad(*req.CoopIdentifier)
+	if exists {
+		//failed = "-"
+		message = "This name is already taken"
+		return &resp
+	}
+
 	// create the coop group
-	coopgames.Store(*req.CoopIdentifier, &contractGame{
+	coopgames.StoreAndUnlock(*req.CoopIdentifier, contractGame{
 		CoopIdentifier:     *req.CoopIdentifier,
 		ContractIdentifier: *contract.Identifier,
 		League:             *req.League,
@@ -343,12 +348,11 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 	})
 
 	// add the membership
-	userinfo, _ := members.Load(*req.UserId)
-	members.Store(*req.UserId, append(userinfo, usermemberinfo{
+	userinfo, _ := members.LockAndLoad(*req.UserId)
+	members.StoreAndUnlock(*req.UserId, append(userinfo, usermemberinfo{
 		Deviceid:    *req.UserId,
 		CoopName:    *req.CoopIdentifier,
 		DisplayName: *req.UserName,
-		LastVisit:   now,
 	}))
 
 	// great success
@@ -376,7 +380,7 @@ func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusRespons
 		GracePeriodSecondsRemaining: &gracePeriodSecondsRemaining,
 	}
 	/*
-		failed := ""
+		failed := "LOG"
 		defer func() {
 			if failed != "" {
 				log.Printf("coopStatus failed: %s", failed)
@@ -392,14 +396,14 @@ func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusRespons
 		return &resp
 	}
 
-	lobby, _ := coopgames.Load(*req.CoopIdentifier)
-	if lobby == nil {
+	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	if !exists {
 		//failed = "group not exists"
 		return &resp
 	}
 
 	if lobby.ContractIdentifier != *req.ContractIdentifier {
-		//failed = "contract identifier mismatch"
+		//failed = fmt.Sprintf("contract identifier mismatch: expected %s got %s", lobby.ContractIdentifier, *req.ContractIdentifier)
 		return &resp
 	}
 
@@ -411,29 +415,29 @@ func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusRespons
 
 	members := getMembersInGroup(*req.CoopIdentifier)
 	for _, member := range members {
-		active := true
-		if !(stamp-member.LastVisit >= 86400) {
-			active = false
-		}
 		contr := ei.ContractCoopStatusResponse_ContributionInfo{}
 		contr.UserId = &member.Deviceid
 		contr.UserName = &member.DisplayName
-		contr.Active = &active
 
-		status, _ := coopstatus.Load(member.Deviceid)
-		if status != nil {
-			contr.ContributionAmount = status.Amount
-			totalAmount += *status.Amount
-			contr.ContributionRate = status.Rate
-			contr.SoulPower = status.SoulPower
-			contr.BoostTokens = status.BoostTokens
+		status, exists := coopstatus.Load(member.Deviceid)
+		if exists {
+			active := false
+			if !(stamp-status.lastvisit >= 86400) {
+				active = true
+			}
+			contr.Active = &active
+			contr.ContributionAmount = status.ccsur.Amount
+			totalAmount += *status.ccsur.Amount
+			contr.ContributionRate = status.ccsur.Rate
+			contr.SoulPower = status.ccsur.SoulPower
+			contr.BoostTokens = status.ccsur.BoostTokens
 		}
 
 		contributors = append(contributors, &contr)
 	}
 	resp.Contributors = contributors
 
-	resp.Gifts, _ = coopgifts.LoadAndDelete(*req.UserId)
+	resp.Gifts, _ = coopgifts.LockedLoadAndDelete(*req.UserId)
 
 	return &resp
 }
@@ -456,7 +460,10 @@ func updateCoopStatus(req *ei.ContractCoopStatusUpdateRequest) *ei.ContractCoopS
 		}()
 	*/
 
-	coopstatus.Store(*req.UserId, req)
+	coopstatus.Store(*req.UserId, coopStatusEx{
+		lastvisit: time.Now().Unix(),
+		ccsur:     req,
+	})
 	finalised = true
 
 	return &resp
@@ -464,10 +471,40 @@ func updateCoopStatus(req *ei.ContractCoopStatusUpdateRequest) *ei.ContractCoopS
 
 func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 	var (
+		success = false
+		message = "Group not found"
+	)
+	resp := ei.JoinCoopResponse{
+		Success: &success,
+		Message: &message,
+	}
+	/*
+		failed := ""
+		defer func() {
+			if failed != "" {
+				log.Printf("joinCoop failed: %s", failed)
+				log.Printf("joinCoop Req: %s", req.String())
+				log.Printf("joinCoop Resp: %s", resp.String())
+			}
+		}()
+	*/
+
+	// check if coop group exists
+	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	if !exists {
+		//failed = fmt.Sprintf("coopIdentifier bad: %s", *req.CoopIdentifier)
+		return &resp
+	}
+
+	return joinCoop2(req, lobby)
+}
+
+func joinCoop2(req *ei.JoinCoopRequest, lobby contractGame) *ei.JoinCoopResponse {
+	var (
 		success          = false
-		message          = "Group not found"
+		message          = "contract identifier mismatch"
 		banned           = false
-		coopIdentifier   = *req.CoopIdentifier
+		coopIdentifier   = lobby.CoopIdentifier
 		secondsRemaining = 5.0
 	)
 	resp := ei.JoinCoopResponse{
@@ -488,16 +525,8 @@ func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 		}()
 	*/
 
-	// check if coop group exists
-	lobby, _ := coopgames.Load(coopIdentifier)
-	if lobby == nil {
-		//failed = fmt.Sprintf("coopIdentifier bad: %s", coopIdentifier)
-		return &resp
-	}
-
 	if lobby.ContractIdentifier != *req.ContractIdentifier {
 		//failed = "contract identifier mismatch"
-		message = "contract identifier mismatch"
 		return &resp
 	}
 
@@ -522,12 +551,11 @@ func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 	resp.SecondsRemaining = &rem
 
 	// add the membership
-	userinfo, _ := members.Load(*req.UserId)
-	members.Store(*req.UserId, append(userinfo, usermemberinfo{
+	userinfo, _ := members.LockAndLoad(*req.UserId)
+	members.StoreAndUnlock(*req.UserId, append(userinfo, usermemberinfo{
 		Deviceid:    *req.UserId,
 		CoopName:    coopIdentifier,
 		DisplayName: *req.UserName,
-		LastVisit:   now,
 	}))
 
 	// success
@@ -539,14 +567,14 @@ func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 func autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopResponse {
 	var (
 		success = false
-		message = "Invalid Contract"
+		message = ""
 	)
 	resp := ei.JoinCoopResponse{
 		Success: &success,
 		Message: &message,
 	}
 	/*
-		failed := ""
+		failed := "LOG"
 		defer func() {
 			if failed != "" {
 				log.Printf("autoJoinCoop failed: %s", failed)
@@ -569,10 +597,9 @@ func autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopResponse {
 	}
 
 	var joinresp *ei.JoinCoopResponse
-	coopgames.Range(func(_ string, v *contractGame) bool {
+	coopgames.LockedRange(func(_ string, v contractGame) bool {
 		if v.Public {
-			joinreq.CoopIdentifier = &v.CoopIdentifier
-			joinresp = joinCoop(joinreq)
+			joinresp = joinCoop2(joinreq, v)
 			if *joinresp.Success == true {
 				return false // stop iterating
 			}
@@ -590,7 +617,7 @@ func autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopResponse {
 
 func leaveCoop(req *ei.LeaveCoopRequest) []byte {
 	/*
-		failed := "-"
+		failed := "LOG"
 		defer func() {
 			if failed != "" {
 				log.Printf("leaveCoop failed: %s", failed)
@@ -599,14 +626,15 @@ func leaveCoop(req *ei.LeaveCoopRequest) []byte {
 			}
 		}()
 	*/
-	userinfo, _ := members.Load(*req.PlayerIdentifier)
+
+	userinfo, _ := members.LockAndLoad(*req.PlayerIdentifier)
 	slices.DeleteFunc(userinfo, func(ui usermemberinfo) bool {
 		if ui.CoopName == *req.CoopIdentifier {
 			return true
 		}
 		return false
 	})
-	members.Store(*req.PlayerIdentifier, userinfo)
+	members.StoreAndUnlock(*req.PlayerIdentifier, userinfo)
 
 	return []byte("Sneed") // it should expect nothing in response
 }
@@ -631,7 +659,8 @@ func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopP
 		}()
 	*/
 
-	lobby, _ := coopgames.Load(*req.CoopIdentifier)
+	lobby, _, unlocker := coopgames.LockLoadWithUnlockerFunc(*req.CoopIdentifier)
+	defer unlocker()
 	if lobby.Owner != *req.RequestingUserId {
 		//failed = "attacker"
 		message = "Only the creator can change the permissions"
@@ -639,7 +668,7 @@ func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopP
 	}
 
 	lobby.Public = *req.Public
-	coopgames.Store(*req.CoopIdentifier, lobby)
+	coopgames.StoreWhenWithUnlocker(*req.CoopIdentifier, lobby)
 
 	success = true
 	message = "Success"
@@ -649,21 +678,23 @@ func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopP
 
 func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 	failed := ""
-	defer func() {
-		if failed != "" {
-			log.Printf("giftPlayerCoop failed: %s", failed)
-			log.Printf("giftPlayerCoop Req: %s", req.String())
-			log.Printf("giftPlayerCoop Resp: None")
-		}
-	}()
+	/*
+		defer func() {
+			if failed != "" {
+				log.Printf("giftPlayerCoop failed: %s", failed)
+				log.Printf("giftPlayerCoop Req: %s", req.String())
+				log.Printf("giftPlayerCoop Resp: None")
+			}
+		}()
+	*/
 
 	// fixme: # TODO: How do we validate the player even has as many boost tokens as they are about to gift?
 	// RequestingUserId sender
 	// PlayerIdentifier receiver
 
 	// check if lobby exists
-	lobby, _ := coopgames.Load(*req.CoopIdentifier)
-	if lobby == nil {
+	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	if !exists {
 		failed = "Coop not fouund"
 		return []byte(failed)
 	}
@@ -699,9 +730,9 @@ func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 		Amount:   req.Amount,
 	}
 
-	currentgifts, _ := coopgifts.Load(*req.PlayerIdentifier)
+	currentgifts, _ := coopgifts.LockAndLoad(*req.PlayerIdentifier)
 	currentgifts = append(currentgifts, &gift)
-	coopgifts.Store(*req.PlayerIdentifier, currentgifts)
+	coopgifts.StoreAndUnlock(*req.PlayerIdentifier, currentgifts)
 
 	return []byte("Chuck") // it should expect nothing in response
 }
