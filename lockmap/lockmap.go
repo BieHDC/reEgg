@@ -25,11 +25,11 @@ func MakeLockMap[K comparable, V any]() *LockMap[K, V] {
 // - Locks the Map
 // - Loads the Value
 // - Unlocks the Map
-func (lm *LockMap[K, V]) LockedLoad(k K) (value V, ok bool) {
+func (lm *LockMap[K, V]) LockedLoad(k K) (V, bool) {
 	lm.mu.Lock()
-	value, ok = lm.m[k]
+	value, ok := lm.m[k]
 	lm.mu.Unlock()
-	return //value, ok
+	return value, ok
 }
 
 // LockedLoadAndDelete performs the following steps:
@@ -37,21 +37,21 @@ func (lm *LockMap[K, V]) LockedLoad(k K) (value V, ok bool) {
 // - Gets the Value
 // - Deletes the Value
 // - Unlocks the Map
-func (lm *LockMap[K, V]) LockedLoadAndDelete(k K) (value V, ok bool) {
+func (lm *LockMap[K, V]) LockedLoadAndDelete(k K) (V, bool) {
 	lm.mu.Lock()
-	value, ok = lm.m[k]
+	value, ok := lm.m[k]
 	delete(lm.m, k)
 	lm.mu.Unlock()
-	return //value, ok
+	return value, ok
 }
 
 // LockAndLoad performs the following steps:
 // - Locks the Map
 // - Loads the Value
-func (lm *LockMap[K, V]) LockAndLoad(k K) (value V, ok bool) {
+func (lm *LockMap[K, V]) LockAndLoad(k K) (V, bool) {
 	lm.mu.Lock()
-	value, ok = lm.m[k]
-	return //value, ok
+	value, ok := lm.m[k]
+	return value, ok
 }
 
 // StoreAndUnlock performs the following steps:
@@ -81,13 +81,12 @@ func (lm *LockMap[K, V]) LockedRange(f func(k K, v V) bool) {
 //   - Loads the Value
 //   - Returns an unlocker func which you should defer or
 //     call when you are done with it.
-func (lm *LockMap[K, V]) LockLoadWithUnlockerFunc(k K) (value V, ok bool, unlocker func()) {
-	unlocker = func() {
+func (lm *LockMap[K, V]) LockLoadWithUnlockerFunc(k K) (V, bool, func()) {
+	lm.mu.Lock()
+	value, ok := lm.m[k]
+	return value, ok, func() {
 		lm.mu.Unlock()
 	}
-	lm.mu.Lock()
-	value, ok = lm.m[k]
-	return //value, ok
 }
 
 // StoreWhenWithUnlocker is used when storing a value when
