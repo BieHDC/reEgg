@@ -148,28 +148,10 @@ type usermemberinfo struct {
 	Deviceid    string
 	CoopName    string
 	DisplayName string
-	LastVisit   time.Time
+	LastVisit   int64
 }
 
 var members genericsync.Map[string, []usermemberinfo]
-
-func countMembersInGroup(coopname string) int {
-	var count int
-
-	members.Range(func(_ string, v []usermemberinfo) bool {
-		for _, mi := range v {
-			if mi.CoopName == coopname {
-				count++
-				break // we can only be in it once
-			}
-		}
-		return true
-	})
-
-	return count
-}
-
-var coopstatus genericsync.Map[string, *ei.ContractCoopStatusUpdateRequest]
 
 func getMembersInGroup(coopname string) []usermemberinfo {
 	var membersingroup []usermemberinfo
@@ -185,6 +167,10 @@ func getMembersInGroup(coopname string) []usermemberinfo {
 	})
 
 	return membersingroup
+}
+
+func countMembersInGroup(coopname string) int {
+	return len(getMembersInGroup(coopname))
 }
 
 func getCoopMemberships(userid string) []string {
@@ -223,15 +209,17 @@ var coopgames genericsync.Map[string, *contractGame]
 
 var coopgifts genericsync.Map[string, []*ei.ContractCoopStatusResponse_CoopGift]
 
+var coopstatus genericsync.Map[string, *ei.ContractCoopStatusUpdateRequest]
+
 func queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 	var (
-		groupexists     = false
+		exists          = false
 		full            = false
 		differentleague = false
 		banned          = false
 	)
 	resp := ei.QueryCoopResponse{
-		Exists:          &groupexists,
+		Exists:          &exists,
 		Full:            &full,
 		DifferentLeague: &differentleague,
 		Banned:          &banned,
@@ -252,12 +240,12 @@ func queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 		return &resp
 	}
 
-	lobby, exists := coopgames.Load(*req.CoopIdentifier)
-	if !exists {
+	lobby, _ := coopgames.Load(*req.CoopIdentifier)
+	if lobby == nil {
 		//failed = "no lobby"
 		return &resp
 	}
-	groupexists = true
+	exists = true
 
 	// check if its in a different league -> reject
 	if lobby.League != *req.League {
@@ -275,10 +263,17 @@ func queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 		return &resp
 	}
 
+	// check if lobby contract and requested contract match
+	if lobby.ContractIdentifier != *req.ContractIdentifier {
+		// assume bad actor
+		banned = true
+		//failed = "contract identifier mismatch"
+		return &resp
+	}
+
 	// check if it is full
-	num := countMembersInGroup(*req.ContractIdentifier)
 	if ct.MaxCoopSize != nil {
-		if num >= int(*ct.MaxCoopSize) {
+		if countMembersInGroup(*req.ContractIdentifier) >= int(*ct.MaxCoopSize) {
 			full = true
 		}
 	}
@@ -333,14 +328,14 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 		return &resp
 	}
 
-	now := time.Now()
+	now := time.Now().Unix()
 	// calc how much time remeaning for it
-	stamp := float64(now.Unix()) - *contract.LengthSeconds + *req.SecondsRemaining
+	stamp := float64(now) - *contract.LengthSeconds + *req.SecondsRemaining
 
 	// create the coop group
 	coopgames.Store(*req.CoopIdentifier, &contractGame{
 		CoopIdentifier:     *req.CoopIdentifier,
-		ContractIdentifier: *contract.Identifier, //fixme why not just a ptr to contract?
+		ContractIdentifier: *contract.Identifier,
 		League:             *req.League,
 		Stamp:              stamp,
 		Owner:              *req.UserId,
@@ -397,22 +392,29 @@ func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusRespons
 		return &resp
 	}
 
-	group, _ := coopgames.Load(*req.CoopIdentifier)
-	if group == nil {
+	lobby, _ := coopgames.Load(*req.CoopIdentifier)
+	if lobby == nil {
 		//failed = "group not exists"
 		return &resp
 	}
 
-	resp.Public = &group.Public
-	resp.CreatorId = &group.Owner
-	rem := group.Stamp + *contract.LengthSeconds - float64(time.Now().Unix())
+	if lobby.ContractIdentifier != *req.ContractIdentifier {
+		//failed = "contract identifier mismatch"
+		return &resp
+	}
+
+	resp.Public = &lobby.Public
+	resp.CreatorId = &lobby.Owner
+	stamp := time.Now().Unix()
+	rem := lobby.Stamp + *contract.LengthSeconds - float64(stamp)
 	resp.SecondsRemaining = &rem
 
 	members := getMembersInGroup(*req.CoopIdentifier)
 	for _, member := range members {
-		var (
-			active = true
-		)
+		active := true
+		if !(stamp-member.LastVisit >= 86400) {
+			active = false
+		}
 		contr := ei.ContractCoopStatusResponse_ContributionInfo{}
 		contr.UserId = &member.Deviceid
 		contr.UserName = &member.DisplayName
@@ -429,7 +431,6 @@ func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusRespons
 
 		contributors = append(contributors, &contr)
 	}
-	// not a pointer, need to reassign
 	resp.Contributors = contributors
 
 	resp.Gifts, _ = coopgifts.LoadAndDelete(*req.UserId)
@@ -466,7 +467,7 @@ func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 		success          = false
 		message          = "Group not found"
 		banned           = false
-		coopIdentifier   = "unknown"
+		coopIdentifier   = *req.CoopIdentifier
 		secondsRemaining = 5.0
 	)
 	resp := ei.JoinCoopResponse{
@@ -488,10 +489,15 @@ func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 	*/
 
 	// check if coop group exists
-	coopIdentifier = *req.CoopIdentifier
-	lobby, exists := coopgames.Load(*req.CoopIdentifier)
-	if !exists {
+	lobby, _ := coopgames.Load(coopIdentifier)
+	if lobby == nil {
 		//failed = fmt.Sprintf("coopIdentifier bad: %s", coopIdentifier)
+		return &resp
+	}
+
+	if lobby.ContractIdentifier != *req.ContractIdentifier {
+		//failed = "contract identifier mismatch"
+		message = "contract identifier mismatch"
 		return &resp
 	}
 
@@ -509,24 +515,23 @@ func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 		message = "Lobby is Full"
 		return &resp
 	}
+	now := time.Now().Unix()
 
-	// TODO bans
-	// success, banned, remaining sec
-	success = true
-
-	group, _ := coopgames.Load(*req.CoopIdentifier)
-	rem := group.Stamp + *contract.LengthSeconds - float64(time.Now().Unix())
+	// remaining seconds
+	rem := lobby.Stamp + *contract.LengthSeconds - float64(now)
 	resp.SecondsRemaining = &rem
 
 	// add the membership
-	now := time.Now()
 	userinfo, _ := members.Load(*req.UserId)
 	members.Store(*req.UserId, append(userinfo, usermemberinfo{
 		Deviceid:    *req.UserId,
-		CoopName:    *req.CoopIdentifier,
+		CoopName:    coopIdentifier,
 		DisplayName: *req.UserName,
 		LastVisit:   now,
 	}))
+
+	// success
+	success = true
 
 	return &resp
 }
@@ -579,8 +584,6 @@ func autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopResponse {
 		return joinresp
 	}
 
-	// fixme if none found, create one
-	// you just have to call createCoop
 	message = "No Lobby found"
 	return &resp
 }
@@ -601,7 +604,7 @@ func leaveCoop(req *ei.LeaveCoopRequest) []byte {
 		if ui.CoopName == *req.CoopIdentifier {
 			return true
 		}
-		return true
+		return false
 	})
 	members.Store(*req.PlayerIdentifier, userinfo)
 
@@ -628,15 +631,15 @@ func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopP
 		}()
 	*/
 
-	group, _ := coopgames.Load(*req.CoopIdentifier)
-	if group.Owner != *req.RequestingUserId {
+	lobby, _ := coopgames.Load(*req.CoopIdentifier)
+	if lobby.Owner != *req.RequestingUserId {
 		//failed = "attacker"
 		message = "Only the creator can change the permissions"
 		return &resp
 	}
 
-	group.Public = *req.Public
-	coopgames.Store(*req.CoopIdentifier, group)
+	lobby.Public = *req.Public
+	coopgames.Store(*req.CoopIdentifier, lobby)
 
 	success = true
 	message = "Success"
@@ -644,7 +647,6 @@ func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopP
 	return &resp
 }
 
-// fixme: not yet tested
 func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 	failed := ""
 	defer func() {
@@ -659,14 +661,19 @@ func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 	// RequestingUserId sender
 	// PlayerIdentifier receiver
 
-	// check if group exists
-	group, _ := coopgames.Load(*req.CoopIdentifier)
-	if group == nil {
+	// check if lobby exists
+	lobby, _ := coopgames.Load(*req.CoopIdentifier)
+	if lobby == nil {
 		failed = "Coop not fouund"
 		return []byte(failed)
 	}
 
-	// check if coop and contract match?
+	// check if coop and contract match
+	if lobby.ContractIdentifier != *req.ContractIdentifier {
+		failed = "contract identifier mismatch"
+		return []byte(failed)
+	}
+
 	contract := getContract(*req.ContractIdentifier)
 	if contract == nil {
 		failed = "Contract not found"
@@ -687,9 +694,9 @@ func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 
 	// insert gift into giftmap
 	gift := ei.ContractCoopStatusResponse_CoopGift{
-		UserId:   &failed,
-		UserName: &failed,
-		Amount:   nil,
+		UserId:   req.RequestingUserId,
+		UserName: req.RequestingUserName,
+		Amount:   req.Amount,
 	}
 
 	currentgifts, _ := coopgifts.Load(*req.PlayerIdentifier)
