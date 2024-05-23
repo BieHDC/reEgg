@@ -129,7 +129,7 @@ func (egg *eggstore) path_update_coop_permissions(decoded []byte) []byte {
 		return nil
 	}
 
-	resp, err := proto.Marshal(updateCoopPermissions(&req))
+	resp, err := proto.Marshal(egg.updateCoopPermissions(&req))
 	if err != nil {
 		log.Printf("failed to marshal UpdateCoopPermissionsResponse: %s", err.Error())
 		return nil
@@ -236,8 +236,6 @@ type contractGame struct {
 	Public             bool
 }
 
-var coopgames = lockmap.MakeLockMap[string, contractGame]()
-
 var coopgifts = lockmap.MakeLockMap[string, []*ei.ContractCoopStatusResponse_CoopGift]()
 
 type coopStatusEx struct {
@@ -317,7 +315,7 @@ func (egg *eggstore) queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 		return &resp
 	}
 
-	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	lobby, exists := egg.coopgames.LockedLoad(*req.CoopIdentifier)
 	if !exists {
 		//failed = "no lobby"
 		return &resp
@@ -414,7 +412,7 @@ func (egg *eggstore) createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopRespons
 	stamp := float64(now) - *contract.LengthSeconds + *req.SecondsRemaining
 
 	// check if the group name is already used -> reject
-	_, exists, unlocker := coopgames.LockLoadWithUnlockerFunc(*req.CoopIdentifier)
+	_, exists, unlocker := egg.coopgames.LockLoadWithUnlockerFunc(*req.CoopIdentifier)
 	if exists {
 		unlocker()
 		//failed = "-"
@@ -423,7 +421,7 @@ func (egg *eggstore) createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopRespons
 	}
 
 	// create the coop group
-	coopgames.StoreWhenWithUnlocker(*req.CoopIdentifier, contractGame{
+	egg.coopgames.StoreWhenWithUnlocker(*req.CoopIdentifier, contractGame{
 		CoopIdentifier:     *req.CoopIdentifier,
 		ContractIdentifier: *contract.Identifier,
 		League:             *req.League,
@@ -488,7 +486,7 @@ func (egg *eggstore) coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractC
 		return &resp
 	}
 
-	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	lobby, exists := egg.coopgames.LockedLoad(*req.CoopIdentifier)
 	if !exists {
 		//failed = "group not exists"
 		return &resp
@@ -610,7 +608,7 @@ func (egg *eggstore) joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 	}
 
 	// check if coop group exists
-	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	lobby, exists := egg.coopgames.LockedLoad(*req.CoopIdentifier)
 	if !exists {
 		//failed = fmt.Sprintf("coopIdentifier bad: %s", *req.CoopIdentifier)
 		return &resp
@@ -730,7 +728,7 @@ func (egg *eggstore) autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopRespo
 	}
 
 	var joinresp *ei.JoinCoopResponse
-	coopgames.LockedRange(func(_ string, v contractGame) bool {
+	egg.coopgames.LockedRange(func(_ string, v contractGame) bool {
 		if v.Public {
 			joinresp = egg.joinCoop2(joinreq, v)
 			if *joinresp.Success == true {
@@ -777,7 +775,7 @@ func (egg *eggstore) leaveCoop(req *ei.LeaveCoopRequest) []byte {
 	return []byte("Sneed") // it should expect nothing in response
 }
 
-func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopPermissionsResponse {
+func (egg *eggstore) updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopPermissionsResponse {
 	var (
 		success = false
 		message = "error"
@@ -803,7 +801,7 @@ func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopP
 		return &resp
 	}
 
-	lobby, _, unlocker := coopgames.LockLoadWithUnlockerFunc(*req.CoopIdentifier)
+	lobby, _, unlocker := egg.coopgames.LockLoadWithUnlockerFunc(*req.CoopIdentifier)
 	defer unlocker()
 	if lobby.Owner != *req.RequestingUserId {
 		//failed = "attacker"
@@ -812,7 +810,7 @@ func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopP
 	}
 
 	lobby.Public = *req.Public
-	coopgames.StoreWhenWithUnlocker(*req.CoopIdentifier, lobby)
+	egg.coopgames.StoreWhenWithUnlocker(*req.CoopIdentifier, lobby)
 
 	success = true
 	message = "Success"
@@ -852,7 +850,7 @@ func (egg *eggstore) giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 	}
 
 	// check if lobby exists
-	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	lobby, exists := egg.coopgames.LockedLoad(*req.CoopIdentifier)
 	if !exists {
 		failed = "Coop not fouund"
 		return []byte(failed)
@@ -930,7 +928,7 @@ func (egg *eggstore) kickPlayerCoop(req *ei.KickPlayerCoopRequest) []byte {
 	}
 
 	// check if lobby exists
-	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
+	lobby, exists := egg.coopgames.LockedLoad(*req.CoopIdentifier)
 	if !exists {
 		failed = "Coop not fouund"
 		return []byte(failed)

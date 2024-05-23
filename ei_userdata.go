@@ -18,7 +18,8 @@ type eggstore struct {
 	//
 	workingpath string
 	//
-	members *lockmap.LockMap[string, []usermemberinfo]
+	members   *lockmap.LockMap[string, []usermemberinfo]
+	coopgames *lockmap.LockMap[string, contractGame]
 }
 
 func newEggstore(motd, workingpath string) eggstore {
@@ -27,7 +28,8 @@ func newEggstore(motd, workingpath string) eggstore {
 		motd:        motd,
 		workingpath: workingpath,
 		//
-		members: lockmap.MakeLockMap[string, []usermemberinfo](),
+		members:   lockmap.MakeLockMap[string, []usermemberinfo](),
+		coopgames: lockmap.MakeLockMap[string, contractGame](),
 	}
 }
 
