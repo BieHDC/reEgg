@@ -33,7 +33,7 @@ The other reasons see the blogpost.
     - [x] Basic Co-op
       - [x] Persistence
       - [ ] Change Displayname (abuse coop contract farm?)
-      - [ ] Computer Simulations
+      - [x] Computer Simulations
   - [x] Events
     - [x] Proof of Concept
     - [x] Event Scheduler

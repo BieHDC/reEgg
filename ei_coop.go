@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"slices"
+	"strings"
 	"time"
 	"unicode"
 
@@ -500,6 +502,11 @@ func (egg *eggstore) coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractC
 	rem := lobby.Stamp + *contract.LengthSeconds - float64(stamp)
 	resp.SecondsRemaining = &rem
 
+	var (
+		amountAcum = 0.0
+		rateAcum   = 0.0
+		soulAcum   = 0.0
+	)
 	members := egg.getMembersInGroup(*req.CoopIdentifier)
 	for _, member := range members {
 		contr := ei.ContractCoopStatusResponse_ContributionInfo{}
@@ -515,23 +522,80 @@ func (egg *eggstore) coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractC
 		if !(stamp-member.Lastvisit >= 86400) {
 			active = true
 		}
+		contr.Active = &active
 
 		if member.Ccsur != nil {
-			contr.Active = &active
 			contr.ContributionAmount = member.Ccsur.Amount
 			totalAmount += *member.Ccsur.Amount
 			contr.ContributionRate = member.Ccsur.Rate
 			contr.SoulPower = member.Ccsur.SoulPower
 			contr.BoostTokens = member.Ccsur.BoostTokens
+			//
+			amountAcum += *member.Ccsur.Amount
+			rateAcum += *member.Ccsur.Rate
+			soulAcum += *member.Ccsur.SoulPower
+			//log.Printf("%.0f %.0f %.0f", *member.Ccsur.Amount, *member.Ccsur.Rate, *member.Ccsur.SoulPower)
 		}
 
 		contributors = append(contributors, &contr)
 	}
+	numMembers := len(members)
+	missing := int(*contract.MaxCoopSize) - numMembers
+	if missing > 0 {
+		amountAcum /= float64(numMembers)
+		rateAcum /= float64(numMembers)
+		soulAcum /= float64(numMembers)
+		bots, amountContributed := makeBotPlayers(missing, amountAcum, rateAcum, soulAcum)
+		totalAmount += amountContributed
+		contributors = append(contributors, bots...)
+	}
+
 	resp.Contributors = contributors
 
 	resp.Gifts, _ = egg.coopgifts.LockedLoadAndDelete(*req.UserId)
 
 	return &resp
+}
+
+func randInBetween[T float64](min, max T) T {
+	return T(rand.N(int(max-min)) + int(min))
+}
+
+func randJittered[T float64](initial T, jitter T) T {
+	return randInBetween(initial-jitter, initial+jitter)
+}
+
+const botPrefix = "Botman"
+
+// looks legit enough
+func makeBotPlayers(num int, amountMed, rateMed, soulMed float64) ([]*ei.ContractCoopStatusResponse_ContributionInfo, float64) {
+	var bots []*ei.ContractCoopStatusResponse_ContributionInfo
+	var amountContributed float64
+
+	for i := range num {
+		var (
+			userid       = fmt.Sprintf("%s %d", botPrefix, i)
+			active       = true
+			alwaysZero   = uint32(0)
+			jitterAmount = randJittered(amountMed, 1500)
+			jitterRate   = randJittered(rateMed, 50)
+			jitterSoul   = randJittered(soulMed, 3)
+		)
+		bot := ei.ContractCoopStatusResponse_ContributionInfo{
+			UserId:             &userid,
+			UserName:           &userid,
+			Active:             &active,
+			ContributionAmount: &jitterAmount,
+			ContributionRate:   &jitterRate,
+			SoulPower:          &jitterSoul,
+			BoostTokens:        &alwaysZero,
+		}
+
+		amountContributed += jitterAmount
+		bots = append(bots, &bot)
+	}
+
+	return bots, amountContributed
 }
 
 func (egg *eggstore) updateCoopStatus(req *ei.ContractCoopStatusUpdateRequest) *ei.ContractCoopStatusUpdateResponse {
@@ -837,18 +901,28 @@ func (egg *eggstore) giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 		}()
 	*/
 
-	// fixme: # TODO: How do we validate the player even has as many boost tokens as they are about to gift?
 	// RequestingUserId sender
 	// PlayerIdentifier receiver
-
-	if !isValidDeviceId(*req.PlayerIdentifier) {
-		//failed = "bad deviceid receiver"
-		return []byte("Bad Receiver DeviceID")
-	}
 
 	if !isValidDeviceId(*req.RequestingUserId) {
 		//failed = "bad deviceid sender"
 		return []byte("Bad Sender DeviceID")
+	}
+
+	if !isValidDeviceId(*req.PlayerIdentifier) {
+		if strings.HasPrefix(*req.PlayerIdentifier, botPrefix) {
+			//log.Printf("player %s wanted to gift a bot, return the gift", *req.RequestingUserId)
+			gift := ei.ContractCoopStatusResponse_CoopGift{
+				UserId:   req.PlayerIdentifier,
+				UserName: req.PlayerIdentifier,
+				Amount:   req.Amount,
+			}
+			currentgifts, _ := egg.coopgifts.LockAndLoad(*req.RequestingUserId)
+			currentgifts = append(currentgifts, &gift)
+			egg.coopgifts.StoreAndUnlock(*req.RequestingUserId, currentgifts)
+		}
+		//failed = "bad deviceid receiver"
+		return []byte("Bad Receiver DeviceID")
 	}
 
 	if !isValidDisplayName(*req.RequestingUserName) {
@@ -901,7 +975,6 @@ func (egg *eggstore) giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 		UserName: req.RequestingUserName,
 		Amount:   req.Amount,
 	}
-
 	currentgifts, _ := egg.coopgifts.LockAndLoad(realdeviceid)
 	currentgifts = append(currentgifts, &gift)
 	egg.coopgifts.StoreAndUnlock(realdeviceid, currentgifts)

@@ -107,11 +107,11 @@ func main() {
 	}()
 
 	<-stop
+	quitperiodicalrunner <- struct{}{}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	srv.Shutdown(ctx)
-	quitperiodicalrunner <- struct{}{}
 	egg.Shutdown()
 }
 
