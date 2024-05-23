@@ -6,6 +6,7 @@ import (
 	"log"
 	"slices"
 	"time"
+	"unicode"
 
 	ei "biehdc.reegg/eggpb"
 	genericsync "biehdc.reegg/genericsyncmap"
@@ -248,6 +249,47 @@ type coopStatusEx struct {
 
 var coopstatus genericsync.Map[string, coopStatusEx]
 
+func isValidDeviceId(s string) bool {
+	if len(s) != 16 {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.Is(unicode.ASCII_Hex_Digit, r) {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidDisplayName(s string) bool {
+	isSpecial := func(r rune) bool {
+		for _, cc := range "-_[]() " {
+			if r == cc {
+				return true
+			}
+		}
+		return false
+	}
+	ll := len(s)
+	if ll < 1 || ll > 20 {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			continue
+		}
+		if unicode.IsNumber(r) {
+			continue
+		}
+		if isSpecial(r) {
+			continue
+		}
+		// it was none of those
+		return false
+	}
+	return true
+}
+
 func queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 	var (
 		exists          = false
@@ -349,6 +391,18 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 		return &resp
 	}
 
+	if !isValidDeviceId(*req.UserId) {
+		//failed = "bad deviceid"
+		message = "Bad DeviceID"
+		return &resp
+	}
+
+	if !isValidDisplayName(*req.UserName) {
+		//failed = "bad username"
+		message = "Invalid Username"
+		return &resp
+	}
+
 	// check if contract exists -> reject if not
 	contract := getContract(*req.ContractIdentifier)
 	if contract == nil {
@@ -362,15 +416,16 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 	stamp := float64(now) - *contract.LengthSeconds + *req.SecondsRemaining
 
 	// check if the group name is already used -> reject
-	_, exists := coopgames.LockAndLoad(*req.CoopIdentifier)
+	_, exists, unlocker := coopgames.LockLoadWithUnlockerFunc(*req.CoopIdentifier)
 	if exists {
+		unlocker()
 		//failed = "-"
 		message = "This name is already taken"
 		return &resp
 	}
 
 	// create the coop group
-	coopgames.StoreAndUnlock(*req.CoopIdentifier, contractGame{
+	coopgames.StoreWhenWithUnlocker(*req.CoopIdentifier, contractGame{
 		CoopIdentifier:     *req.CoopIdentifier,
 		ContractIdentifier: *contract.Identifier,
 		League:             *req.League,
@@ -378,6 +433,7 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 		Owner:              *req.UserId,
 		Public:             false,
 	})
+	unlocker()
 
 	// add the membership
 	userinfo, _ := members.LockAndLoad(*req.UserId)
@@ -422,6 +478,11 @@ func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusRespons
 			}
 		}()
 	*/
+
+	if !isValidDeviceId(*req.UserId) {
+		//failed = "bad deviceid"
+		return &resp
+	}
 
 	contract := getContract(*req.ContractIdentifier)
 	if contract == nil {
@@ -504,6 +565,11 @@ func updateCoopStatus(req *ei.ContractCoopStatusUpdateRequest) *ei.ContractCoopS
 		}()
 	*/
 
+	if !isValidDeviceId(*req.UserId) {
+		//failed = "bad deviceid"
+		return &resp
+	}
+
 	coopstatus.Store(*req.UserId, coopStatusEx{
 		lastvisit: time.Now().Unix(),
 		ccsur:     req,
@@ -532,6 +598,18 @@ func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 			}
 		}()
 	*/
+
+	if !isValidDeviceId(*req.UserId) {
+		//failed = "bad deviceid"
+		message = "Bad DeviceID"
+		return &resp
+	}
+
+	if !isValidDisplayName(*req.UserName) {
+		//failed = "bad username"
+		message = "Invalid Username"
+		return &resp
+	}
 
 	// check if coop group exists
 	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
@@ -629,6 +707,18 @@ func autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopResponse {
 		}()
 	*/
 
+	if !isValidDeviceId(*req.UserId) {
+		//failed = "bad deviceid"
+		message = "Bad DeviceID"
+		return &resp
+	}
+
+	if !isValidDisplayName(*req.UserName) {
+		//failed = "bad username"
+		message = "Invalid Username"
+		return &resp
+	}
+
 	// convert the request
 	joinreq := &ei.JoinCoopRequest{
 		ContractIdentifier: req.ContractIdentifier,
@@ -672,6 +762,11 @@ func leaveCoop(req *ei.LeaveCoopRequest) []byte {
 		}()
 	*/
 
+	if !isValidDeviceId(*req.PlayerIdentifier) {
+		//failed = "bad deviceid"
+		return []byte("bad deviceid")
+	}
+
 	userinfo, _ := members.LockAndLoad(*req.PlayerIdentifier)
 	slices.DeleteFunc(userinfo, func(ui usermemberinfo) bool {
 		if ui.CoopName == *req.CoopIdentifier {
@@ -703,6 +798,12 @@ func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopP
 			}
 		}()
 	*/
+
+	if !isValidDeviceId(*req.RequestingUserId) {
+		//failed = "bad deviceid"
+		message = "Bad DeviceID"
+		return &resp
+	}
 
 	lobby, _, unlocker := coopgames.LockLoadWithUnlockerFunc(*req.CoopIdentifier)
 	defer unlocker()
@@ -736,6 +837,21 @@ func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 	// fixme: # TODO: How do we validate the player even has as many boost tokens as they are about to gift?
 	// RequestingUserId sender
 	// PlayerIdentifier receiver
+
+	if !isValidDeviceId(*req.PlayerIdentifier) {
+		//failed = "bad deviceid receiver"
+		return []byte("Bad Receiver DeviceID")
+	}
+
+	if !isValidDeviceId(*req.RequestingUserId) {
+		//failed = "bad deviceid sender"
+		return []byte("Bad Sender DeviceID")
+	}
+
+	if !isValidDisplayName(*req.RequestingUserName) {
+		//failed = "bad username"
+		return []byte("Invalid Sender Username")
+	}
 
 	// check if lobby exists
 	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
@@ -804,6 +920,16 @@ func kickPlayerCoop(req *ei.KickPlayerCoopRequest) []byte {
 
 	// RequestingUserId sender
 	// PlayerIdentifier receiver
+
+	if !isValidDeviceId(*req.PlayerIdentifier) {
+		//failed = "bad deviceid receiver"
+		return []byte("Bad Receiver DeviceID")
+	}
+
+	if !isValidDeviceId(*req.RequestingUserId) {
+		//failed = "bad deviceid sender"
+		return []byte("Bad Sender DeviceID")
+	}
 
 	// check if lobby exists
 	lobby, exists := coopgames.LockedLoad(*req.CoopIdentifier)
