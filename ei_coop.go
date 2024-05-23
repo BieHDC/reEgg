@@ -10,7 +10,6 @@ import (
 
 	ei "biehdc.reegg/eggpb"
 	genericsync "biehdc.reegg/genericsyncmap"
-	"biehdc.reegg/lockmap"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -235,8 +234,6 @@ type contractGame struct {
 	Owner              string
 	Public             bool
 }
-
-var coopgifts = lockmap.MakeLockMap[string, []*ei.ContractCoopStatusResponse_CoopGift]()
 
 type coopStatusEx struct {
 	lastvisit int64
@@ -538,7 +535,7 @@ func (egg *eggstore) coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractC
 	}
 	resp.Contributors = contributors
 
-	resp.Gifts, _ = coopgifts.LockedLoadAndDelete(*req.UserId)
+	resp.Gifts, _ = egg.coopgifts.LockedLoadAndDelete(*req.UserId)
 
 	return &resp
 }
@@ -895,9 +892,9 @@ func (egg *eggstore) giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 		Amount:   req.Amount,
 	}
 
-	currentgifts, _ := coopgifts.LockAndLoad(realdeviceid)
+	currentgifts, _ := egg.coopgifts.LockAndLoad(realdeviceid)
 	currentgifts = append(currentgifts, &gift)
-	coopgifts.StoreAndUnlock(realdeviceid, currentgifts)
+	egg.coopgifts.StoreAndUnlock(realdeviceid, currentgifts)
 
 	return []byte("Chuck") // it should expect nothing in response
 }

@@ -20,6 +20,7 @@ type eggstore struct {
 	//
 	members   *lockmap.LockMap[string, []usermemberinfo]
 	coopgames *lockmap.LockMap[string, contractGame]
+	coopgifts *lockmap.LockMap[string, []*ei.ContractCoopStatusResponse_CoopGift]
 }
 
 func newEggstore(motd, workingpath string) eggstore {
@@ -30,6 +31,7 @@ func newEggstore(motd, workingpath string) eggstore {
 		//
 		members:   lockmap.MakeLockMap[string, []usermemberinfo](),
 		coopgames: lockmap.MakeLockMap[string, contractGame](),
+		coopgifts: lockmap.MakeLockMap[string, []*ei.ContractCoopStatusResponse_CoopGift](),
 	}
 }
 
