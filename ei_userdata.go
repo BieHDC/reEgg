@@ -5,17 +5,20 @@ import (
 
 	ei "biehdc.reegg/eggpb"
 	syncmap "biehdc.reegg/genericsyncmap"
+	"biehdc.reegg/lockmap"
 	"google.golang.org/protobuf/proto"
 )
 
 type eggstore struct {
-	motd            string
+	motd string
 	//
 	users             syncmap.Map[string, *ei.Backup]
 	notificationevent syncmap.Map[string, []userEvent]
 	pendinggifts      syncmap.Map[string, []*ei.ServerGift]
 	//
 	workingpath string
+	//
+	members *lockmap.LockMap[string, []usermemberinfo]
 }
 
 func newEggstore(motd, workingpath string) eggstore {
@@ -23,6 +26,8 @@ func newEggstore(motd, workingpath string) eggstore {
 	return eggstore{
 		motd:        motd,
 		workingpath: workingpath,
+		//
+		members: lockmap.MakeLockMap[string, []usermemberinfo](),
 	}
 }
 
@@ -160,7 +165,7 @@ func (egg *eggstore) path_user_data_info(decoded []byte) []byte {
 	udiresp := ei.UserDataInfoResponse{
 		BackupChecksum:  backup.Checksum,
 		BackupTotalCash: backup.Game.LifetimeCashEarned,
-		CoopMemberships: getCoopMemberships(*udireq.UserId),
+		CoopMemberships: egg.getCoopMemberships(*udireq.UserId),
 	}
 
 	resp, err := proto.Marshal(&udiresp)

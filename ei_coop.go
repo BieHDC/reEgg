@@ -22,7 +22,7 @@ func (egg *eggstore) path_query_coop(decoded []byte) []byte {
 		return nil
 	}
 
-	resp, err := proto.Marshal(queryCoop(&req))
+	resp, err := proto.Marshal(egg.queryCoop(&req))
 	if err != nil {
 		log.Printf("failed to marshal QueryCoopResponse: %s", err.Error())
 		return nil
@@ -38,7 +38,7 @@ func (egg *eggstore) path_create_coop(decoded []byte) []byte {
 		return nil
 	}
 
-	resp, err := proto.Marshal(createCoop(&req))
+	resp, err := proto.Marshal(egg.createCoop(&req))
 	if err != nil {
 		log.Printf("failed to marshal CreateCoopResponse: %s", err.Error())
 		return nil
@@ -54,7 +54,7 @@ func (egg *eggstore) path_coop_status(decoded []byte) []byte {
 		return nil
 	}
 
-	resp, err := proto.Marshal(coopStatus(&req))
+	resp, err := proto.Marshal(egg.coopStatus(&req))
 	if err != nil {
 		log.Printf("failed to marshal ContractCoopStatusResponse: %s", err.Error())
 		return nil
@@ -86,7 +86,7 @@ func (egg *eggstore) path_join_coop(decoded []byte) []byte {
 		return nil
 	}
 
-	resp, err := proto.Marshal(joinCoop(&req))
+	resp, err := proto.Marshal(egg.joinCoop(&req))
 	if err != nil {
 		log.Printf("failed to marshal JoinCoopResponse: %s", err.Error())
 		return nil
@@ -102,7 +102,7 @@ func (egg *eggstore) path_auto_join_coop(decoded []byte) []byte {
 		return nil
 	}
 
-	resp, err := proto.Marshal(autoJoinCoop(&req))
+	resp, err := proto.Marshal(egg.autoJoinCoop(&req))
 	if err != nil {
 		log.Printf("failed to marshal JoinCoopResponse: %s", err.Error())
 		return nil
@@ -118,7 +118,7 @@ func (egg *eggstore) path_leave_coop(decoded []byte) []byte {
 		return nil
 	}
 
-	return leaveCoop(&req)
+	return egg.leaveCoop(&req)
 }
 
 func (egg *eggstore) path_update_coop_permissions(decoded []byte) []byte {
@@ -145,7 +145,7 @@ func (egg *eggstore) path_gift_player_coop(decoded []byte) []byte {
 		return nil
 	}
 
-	return giftPlayerCoop(&req)
+	return egg.giftPlayerCoop(&req)
 }
 
 func (egg *eggstore) path_kick_player_coop(decoded []byte) []byte {
@@ -156,7 +156,7 @@ func (egg *eggstore) path_kick_player_coop(decoded []byte) []byte {
 		return nil
 	}
 
-	return kickPlayerCoop(&req)
+	return egg.kickPlayerCoop(&req)
 }
 
 type usermemberinfo struct {
@@ -166,12 +166,10 @@ type usermemberinfo struct {
 	PrivacyId   string
 }
 
-var members = lockmap.MakeLockMap[string, []usermemberinfo]()
-
-func getMembersInGroup(coopname string) []usermemberinfo {
+func (egg *eggstore) getMembersInGroup(coopname string) []usermemberinfo {
 	var membersingroup []usermemberinfo
 
-	members.LockedRange(func(k string, v []usermemberinfo) bool {
+	egg.members.LockedRange(func(k string, v []usermemberinfo) bool {
 		for _, mi := range v {
 			if mi.CoopName == coopname {
 				membersingroup = append(membersingroup, mi)
@@ -184,14 +182,14 @@ func getMembersInGroup(coopname string) []usermemberinfo {
 	return membersingroup
 }
 
-func countMembersInGroup(coopname string) int {
-	return len(getMembersInGroup(coopname))
+func (egg *eggstore) countMembersInGroup(coopname string) int {
+	return len(egg.getMembersInGroup(coopname))
 }
 
-func getCoopMemberships(userid string) []string {
+func (egg *eggstore) getCoopMemberships(userid string) []string {
 	var memberships []string
 
-	userinfo, _ := members.LockedLoad(userid)
+	userinfo, _ := egg.members.LockedLoad(userid)
 	for _, ui := range userinfo {
 		memberships = append(memberships, ui.CoopName)
 	}
@@ -199,8 +197,8 @@ func getCoopMemberships(userid string) []string {
 	return memberships
 }
 
-func isPlayerInCoop(userid string, groupname string) bool {
-	memberships := getCoopMemberships(userid)
+func (egg *eggstore) isPlayerInCoop(userid string, groupname string) bool {
+	memberships := egg.getCoopMemberships(userid)
 
 	for _, group := range memberships {
 		if group == groupname {
@@ -217,8 +215,8 @@ func calculatePrivacyId(deviceid string) string {
 }
 
 // also implicitly confirms the player is in the lobby
-func deviceIdFromPrivacyId(coopname, privacyid string) string {
-	members := getMembersInGroup(coopname)
+func (egg *eggstore) deviceIdFromPrivacyId(coopname, privacyid string) string {
+	members := egg.getMembersInGroup(coopname)
 
 	for _, member := range members {
 		if member.PrivacyId == privacyid {
@@ -290,7 +288,7 @@ func isValidDisplayName(s string) bool {
 	return true
 }
 
-func queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
+func (egg *eggstore) queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 	var (
 		exists          = false
 		full            = false
@@ -352,7 +350,7 @@ func queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 
 	// check if it is full
 	if ct.MaxCoopSize != nil {
-		if countMembersInGroup(*req.ContractIdentifier) >= int(*ct.MaxCoopSize) {
+		if egg.countMembersInGroup(*req.ContractIdentifier) >= int(*ct.MaxCoopSize) {
 			full = true
 		}
 	}
@@ -360,7 +358,7 @@ func queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 	return &resp
 }
 
-func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
+func (egg *eggstore) createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 	var (
 		successbool = false
 		message     = "Bad Coop Identifier"
@@ -436,8 +434,8 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 	unlocker()
 
 	// add the membership
-	userinfo, _ := members.LockAndLoad(*req.UserId)
-	members.StoreAndUnlock(*req.UserId, append(userinfo, usermemberinfo{
+	userinfo, _ := egg.members.LockAndLoad(*req.UserId)
+	egg.members.StoreAndUnlock(*req.UserId, append(userinfo, usermemberinfo{
 		Deviceid:    *req.UserId,
 		CoopName:    *req.CoopIdentifier,
 		DisplayName: *req.UserName,
@@ -451,7 +449,7 @@ func createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
 	return &resp
 }
 
-func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusResponse {
+func (egg *eggstore) coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusResponse {
 	var (
 		totalAmount                 = 0.0
 		contributors                []*ei.ContractCoopStatusResponse_ContributionInfo
@@ -513,7 +511,7 @@ func coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractCoopStatusRespons
 	rem := lobby.Stamp + *contract.LengthSeconds - float64(stamp)
 	resp.SecondsRemaining = &rem
 
-	members := getMembersInGroup(*req.CoopIdentifier)
+	members := egg.getMembersInGroup(*req.CoopIdentifier)
 	for _, member := range members {
 		contr := ei.ContractCoopStatusResponse_ContributionInfo{}
 		// do not obfuscate ourselves to ourselves
@@ -579,7 +577,7 @@ func updateCoopStatus(req *ei.ContractCoopStatusUpdateRequest) *ei.ContractCoopS
 	return &resp
 }
 
-func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
+func (egg *eggstore) joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 	var (
 		success = false
 		message = "Group not found"
@@ -618,10 +616,10 @@ func joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 		return &resp
 	}
 
-	return joinCoop2(req, lobby)
+	return egg.joinCoop2(req, lobby)
 }
 
-func joinCoop2(req *ei.JoinCoopRequest, lobby contractGame) *ei.JoinCoopResponse {
+func (egg *eggstore) joinCoop2(req *ei.JoinCoopRequest, lobby contractGame) *ei.JoinCoopResponse {
 	var (
 		success          = false
 		message          = "contract identifier mismatch"
@@ -659,7 +657,7 @@ func joinCoop2(req *ei.JoinCoopRequest, lobby contractGame) *ei.JoinCoopResponse
 	}
 
 	contract := getContract(*req.ContractIdentifier)
-	num := countMembersInGroup(coopIdentifier)
+	num := egg.countMembersInGroup(coopIdentifier)
 	// check if full
 	if contract != nil && contract.MaxCoopSize != nil && num >= int(*contract.MaxCoopSize) {
 		//failed = "lobby full"
@@ -673,8 +671,8 @@ func joinCoop2(req *ei.JoinCoopRequest, lobby contractGame) *ei.JoinCoopResponse
 	resp.SecondsRemaining = &rem
 
 	// add the membership
-	userinfo, _ := members.LockAndLoad(*req.UserId)
-	members.StoreAndUnlock(*req.UserId, append(userinfo, usermemberinfo{
+	userinfo, _ := egg.members.LockAndLoad(*req.UserId)
+	egg.members.StoreAndUnlock(*req.UserId, append(userinfo, usermemberinfo{
 		Deviceid:    *req.UserId,
 		CoopName:    coopIdentifier,
 		DisplayName: *req.UserName,
@@ -687,7 +685,7 @@ func joinCoop2(req *ei.JoinCoopRequest, lobby contractGame) *ei.JoinCoopResponse
 	return &resp
 }
 
-func autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopResponse {
+func (egg *eggstore) autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopResponse {
 	var (
 		success = false
 		message = ""
@@ -734,7 +732,7 @@ func autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopResponse {
 	var joinresp *ei.JoinCoopResponse
 	coopgames.LockedRange(func(_ string, v contractGame) bool {
 		if v.Public {
-			joinresp = joinCoop2(joinreq, v)
+			joinresp = egg.joinCoop2(joinreq, v)
 			if *joinresp.Success == true {
 				return false // stop iterating
 			}
@@ -750,7 +748,7 @@ func autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopResponse {
 	return &resp
 }
 
-func leaveCoop(req *ei.LeaveCoopRequest) []byte {
+func (egg *eggstore) leaveCoop(req *ei.LeaveCoopRequest) []byte {
 	/*
 		failed := "LOG"
 		defer func() {
@@ -767,14 +765,14 @@ func leaveCoop(req *ei.LeaveCoopRequest) []byte {
 		return []byte("bad deviceid")
 	}
 
-	userinfo, _ := members.LockAndLoad(*req.PlayerIdentifier)
+	userinfo, _ := egg.members.LockAndLoad(*req.PlayerIdentifier)
 	slices.DeleteFunc(userinfo, func(ui usermemberinfo) bool {
 		if ui.CoopName == *req.CoopIdentifier {
 			return true
 		}
 		return false
 	})
-	members.StoreAndUnlock(*req.PlayerIdentifier, userinfo)
+	egg.members.StoreAndUnlock(*req.PlayerIdentifier, userinfo)
 
 	return []byte("Sneed") // it should expect nothing in response
 }
@@ -822,7 +820,7 @@ func updateCoopPermissions(req *ei.UpdateCoopPermissionsRequest) *ei.UpdateCoopP
 	return &resp
 }
 
-func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
+func (egg *eggstore) giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 	failed := ""
 	/*
 		defer func() {
@@ -873,13 +871,13 @@ func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 	}
 
 	// check if sender is in a coop
-	if !isPlayerInCoop(*req.RequestingUserId, *req.CoopIdentifier) {
+	if !egg.isPlayerInCoop(*req.RequestingUserId, *req.CoopIdentifier) {
 		failed = "Sender not in Group"
 		return []byte(failed)
 	}
 
 	// deobfuscate deviceid
-	realdeviceid := deviceIdFromPrivacyId(*req.CoopIdentifier, *req.PlayerIdentifier)
+	realdeviceid := egg.deviceIdFromPrivacyId(*req.CoopIdentifier, *req.PlayerIdentifier)
 	if realdeviceid == "" {
 		failed = "Receiver not in Group"
 		return []byte(failed)
@@ -906,7 +904,7 @@ func giftPlayerCoop(req *ei.GiftPlayerCoopRequest) []byte {
 	return []byte("Chuck") // it should expect nothing in response
 }
 
-func kickPlayerCoop(req *ei.KickPlayerCoopRequest) []byte {
+func (egg *eggstore) kickPlayerCoop(req *ei.KickPlayerCoopRequest) []byte {
 	failed := ""
 	/*
 		defer func() {
@@ -957,13 +955,13 @@ func kickPlayerCoop(req *ei.KickPlayerCoopRequest) []byte {
 	}
 
 	// check if sender is in a coop
-	if !isPlayerInCoop(*req.RequestingUserId, *req.CoopIdentifier) {
+	if !egg.isPlayerInCoop(*req.RequestingUserId, *req.CoopIdentifier) {
 		failed = "Sender not in Group"
 		return []byte(failed)
 	}
 
 	// deobfuscate deviceid
-	realdeviceid := deviceIdFromPrivacyId(*req.CoopIdentifier, *req.PlayerIdentifier)
+	realdeviceid := egg.deviceIdFromPrivacyId(*req.CoopIdentifier, *req.PlayerIdentifier)
 	if realdeviceid == "" {
 		failed = "Receiver not in Group"
 		return []byte(failed)
@@ -976,7 +974,7 @@ func kickPlayerCoop(req *ei.KickPlayerCoopRequest) []byte {
 	//}
 
 	// make the kicked player leave
-	return leaveCoop(&ei.LeaveCoopRequest{
+	return egg.leaveCoop(&ei.LeaveCoopRequest{
 		ContractIdentifier: req.ContractIdentifier,
 		CoopIdentifier:     req.CoopIdentifier,
 		PlayerIdentifier:   &realdeviceid,
