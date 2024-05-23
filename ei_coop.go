@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	ei "biehdc.reegg/eggpb"
-	genericsync "biehdc.reegg/genericsyncmap"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -69,7 +68,7 @@ func (egg *eggstore) path_update_coop_status(decoded []byte) []byte {
 		return nil
 	}
 
-	resp, err := proto.Marshal(updateCoopStatus(&req))
+	resp, err := proto.Marshal(egg.updateCoopStatus(&req))
 	if err != nil {
 		log.Printf("failed to marshal ContractCoopStatusUpdateResponse: %s", err.Error())
 		return nil
@@ -163,6 +162,8 @@ type usermemberinfo struct {
 	CoopName    string
 	DisplayName string
 	PrivacyId   string
+	Lastvisit   int64
+	Ccsur       *ei.ContractCoopStatusUpdateRequest
 }
 
 func (egg *eggstore) getMembersInGroup(coopname string) []usermemberinfo {
@@ -234,13 +235,6 @@ type contractGame struct {
 	Owner              string
 	Public             bool
 }
-
-type coopStatusEx struct {
-	lastvisit int64
-	ccsur     *ei.ContractCoopStatusUpdateRequest
-}
-
-var coopstatus genericsync.Map[string, coopStatusEx]
 
 func isValidDeviceId(s string) bool {
 	if len(s) != 16 {
@@ -517,18 +511,18 @@ func (egg *eggstore) coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractC
 		}
 		contr.UserName = &member.DisplayName
 
-		status, exists := coopstatus.Load(member.Deviceid)
-		if exists {
-			active := false
-			if !(stamp-status.lastvisit >= 86400) {
-				active = true
-			}
+		active := false
+		if !(stamp-member.Lastvisit >= 86400) {
+			active = true
+		}
+
+		if member.Ccsur != nil {
 			contr.Active = &active
-			contr.ContributionAmount = status.ccsur.Amount
-			totalAmount += *status.ccsur.Amount
-			contr.ContributionRate = status.ccsur.Rate
-			contr.SoulPower = status.ccsur.SoulPower
-			contr.BoostTokens = status.ccsur.BoostTokens
+			contr.ContributionAmount = member.Ccsur.Amount
+			totalAmount += *member.Ccsur.Amount
+			contr.ContributionRate = member.Ccsur.Rate
+			contr.SoulPower = member.Ccsur.SoulPower
+			contr.BoostTokens = member.Ccsur.BoostTokens
 		}
 
 		contributors = append(contributors, &contr)
@@ -540,7 +534,7 @@ func (egg *eggstore) coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractC
 	return &resp
 }
 
-func updateCoopStatus(req *ei.ContractCoopStatusUpdateRequest) *ei.ContractCoopStatusUpdateResponse {
+func (egg *eggstore) updateCoopStatus(req *ei.ContractCoopStatusUpdateRequest) *ei.ContractCoopStatusUpdateResponse {
 	var (
 		finalised = false
 	)
@@ -563,10 +557,16 @@ func updateCoopStatus(req *ei.ContractCoopStatusUpdateRequest) *ei.ContractCoopS
 		return &resp
 	}
 
-	coopstatus.Store(*req.UserId, coopStatusEx{
-		lastvisit: time.Now().Unix(),
-		ccsur:     req,
-	})
+	userinfo, _ := egg.members.LockAndLoad(*req.UserId)
+	for i, ui := range userinfo {
+		if ui.CoopName == *req.CoopIdentifier {
+			userinfo[i].Lastvisit = time.Now().Unix()
+			userinfo[i].Ccsur = req
+			break
+		}
+	}
+	egg.members.StoreAndUnlock(*req.UserId, userinfo)
+
 	finalised = true
 
 	return &resp
