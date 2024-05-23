@@ -23,16 +23,17 @@ type eggstore struct {
 	coopgifts *lockmap.LockMap[string, []*ei.ContractCoopStatusResponse_CoopGift]
 }
 
-func newEggstore(motd, workingpath string) eggstore {
+func newEggstore(motd, workingpath string) *eggstore {
 	generateContracts(workingpath)
-	return eggstore{
+	egg := eggstore{
 		motd:        motd,
 		workingpath: workingpath,
-		//
-		members:   lockmap.MakeLockMap[string, []usermemberinfo](),
-		coopgames: lockmap.MakeLockMap[string, contractGame](),
-		coopgifts: lockmap.MakeLockMap[string, []*ei.ContractCoopStatusResponse_CoopGift](),
 	}
+	egg.members = egg.loadMembersFromFile()
+	egg.coopgames = egg.loadCoopgamesFromFile()
+	egg.coopgifts = egg.loadCoopgiftsFromFile()
+
+	return &egg
 }
 
 func (egg *eggstore) path_first_contact(decoded []byte) []byte {

@@ -31,7 +31,7 @@ The other reasons see the blogpost.
     - [x] Your First Contract
     - [x] Contract Scheduler
     - [x] Basic Co-op
-      - [ ] Persistence (your client will be very unhappy)
+      - [x] Persistence
       - [ ] Change Displayname (abuse coop contract farm?)
       - [ ] Computer Simulations
   - [x] Events

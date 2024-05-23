@@ -761,13 +761,23 @@ func (egg *eggstore) leaveCoop(req *ei.LeaveCoopRequest) []byte {
 	}
 
 	userinfo, _ := egg.members.LockAndLoad(*req.PlayerIdentifier)
-	slices.DeleteFunc(userinfo, func(ui usermemberinfo) bool {
+	userinfo = slices.DeleteFunc(userinfo, func(ui usermemberinfo) bool {
 		if ui.CoopName == *req.CoopIdentifier {
 			return true
 		}
 		return false
 	})
-	egg.members.StoreAndUnlock(*req.PlayerIdentifier, userinfo)
+	if len(userinfo) < 1 {
+		// user is in no lobby anymore
+		egg.members.DeleteAndUnlock(*req.PlayerIdentifier)
+	} else {
+		egg.members.StoreAndUnlock(*req.PlayerIdentifier, userinfo)
+	}
+
+	if egg.countMembersInGroup(*req.CoopIdentifier) < 1 {
+		//log.Printf("lobby %s is empty, deleting...", *req.CoopIdentifier)
+		egg.coopgames.LockedDelete(*req.CoopIdentifier)
+	}
 
 	return []byte("Sneed") // it should expect nothing in response
 }

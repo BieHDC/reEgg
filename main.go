@@ -91,12 +91,28 @@ func main() {
 		stop <- os.Kill
 	}()
 
+	quitperiodicalrunner := make(chan struct{})
+	go func() {
+		// we save our state every minute to the files
+		interval := time.NewTicker(1 * time.Minute)
+		defer interval.Stop()
+		for {
+			select {
+			case <-interval.C:
+				egg.SaveData()
+			case <-quitperiodicalrunner:
+				return
+			}
+		}
+	}()
+
+	<-stop
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	<-stop
 	srv.Shutdown(ctx)
-	egg.Shutdown() // just prints to log right now
+	quitperiodicalrunner <- struct{}{}
+	egg.Shutdown()
 }
 
 func loadConfig(userdir string) (Config, string) {

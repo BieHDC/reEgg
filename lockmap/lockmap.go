@@ -13,10 +13,17 @@ type LockMap[K comparable, V any] struct {
 }
 
 // MakeLockMap make()s the underlying map ready for use.
-// Just like a normal map, you have to make() it
-func MakeLockMap[K comparable, V any]() *LockMap[K, V] {
-	lm := LockMap[K, V]{
-		m: make(map[K]V),
+// Just like a normal map, you have to make() it.
+// It takes an optional parameter to an already existing
+// map to use as initial map. You may not access it anymore
+// after you have created the lockmap and only access it
+// through LockMap's exposed functions.
+func MakeLockMap[K comparable, V any](initialmap *map[K]V) *LockMap[K, V] {
+	lm := LockMap[K, V]{}
+	if initialmap != nil {
+		lm.m = *initialmap
+	} else {
+		lm.m = make(map[K]V)
 	}
 	return &lm
 }
@@ -45,6 +52,16 @@ func (lm *LockMap[K, V]) LockedLoadAndDelete(k K) (V, bool) {
 	return value, ok
 }
 
+// LockedLoadAndDelete performs the following steps:
+// - Locks the Map
+// - Deletes the Value
+// - Unlocks the Map
+func (lm *LockMap[K, V]) LockedDelete(k K) {
+	lm.mu.Lock()
+	delete(lm.m, k)
+	lm.mu.Unlock()
+}
+
 // LockAndLoad performs the following steps:
 // - Locks the Map
 // - Loads the Value
@@ -59,6 +76,14 @@ func (lm *LockMap[K, V]) LockAndLoad(k K) (V, bool) {
 // - Unlocks the Map
 func (lm *LockMap[K, V]) StoreAndUnlock(k K, v V) {
 	lm.m[k] = v
+	lm.mu.Unlock()
+}
+
+// DeleteAndUnlock performs the following steps:
+// - Deletes the Value
+// - Unlocks the Map
+func (lm *LockMap[K, V]) DeleteAndUnlock(k K) {
+	delete(lm.m, k)
 	lm.mu.Unlock()
 }
 
@@ -91,7 +116,16 @@ func (lm *LockMap[K, V]) LockLoadWithUnlockerFunc(k K) (V, bool, func()) {
 
 // StoreWhenWithUnlocker is used when storing a value when
 // the map was previously locked with LockLoadWithUnlockerFunc
-// fixme: can and should we add safety against misuse?
 func (lm *LockMap[K, V]) StoreWhenWithUnlocker(k K, v V) {
 	lm.m[k] = v
+}
+
+// UnderlyingMap returns a pointer to the map that is protected.
+// You are supposed to only read from the map. Unlock the map with
+// the returned unlocker function after you are done reading.
+func (lm *LockMap[K, V]) LockAndGetUnderlyingMapWithUnlocker() (*map[K]V, func()) {
+	lm.mu.Lock()
+	return &lm.m, func() {
+		lm.mu.Unlock()
+	}
 }

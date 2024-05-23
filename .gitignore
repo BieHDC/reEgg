@@ -1,2 +1,5 @@
 biehdc.reegg
 data/savegame_*
+data/coopgames.json
+data/coopgifts.json
+data/members.json
