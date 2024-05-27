@@ -8,7 +8,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// fixme maybe some logic? special occasion? welcome back gift? later when proper account system?
 // get_periodicals: user_id:"aaa" piggy_full:true piggy_found_full:false seconds_full_realtime:96802.13004922867 seconds_full_gametime:13304.21092633903 soul_eggs:1290.0000000000002 current_client_version:26 debug:false
 func (egg *eggstore) serverGifts(pr *ei.GetPeriodicalsRequest) []*ei.ServerGift {
 	if pr.UserId == nil {

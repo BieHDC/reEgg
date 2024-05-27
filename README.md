@@ -26,13 +26,13 @@ The other reasons see the blogpost.
   - [ ] Break Piggy Bank week after filling
   - [ ] Rename a device ID to a friendly name via API
   - [ ] Self-service dashboard & GUI
-- [ ] Periodicals
-  - [ ] Contracts
+- [x] Periodicals
+  - [x] Contracts
     - [x] Your First Contract
     - [x] Contract Scheduler
     - [x] Basic Co-op
       - [x] Persistence
-      - [ ] Change Displayname (abuse coop contract farm?)
+      - [x] Change Displayname (Permanent Contract)
       - [x] Computer Simulations
   - [x] Events
     - [x] Proof of Concept
@@ -43,11 +43,8 @@ The other reasons see the blogpost.
   - [x] Give Soul Eggs to unlock contract view early for motd.
 - [ ] Private Server API
   - [x] Simple Leaderboard
-  - [ ] Account self service interface
-    - [ ] Figure out how we would make this secure
-  - [ ] Admin interface
   - [ ] Server Federation
-- [ ] Periodicals
+- [x] Periodicals
   - [x] Random Gift from Server
   - [x] Good Morning message (on first_contact)
 

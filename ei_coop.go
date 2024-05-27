@@ -322,8 +322,8 @@ func (egg *eggstore) queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 	}
 
 	// check if contract exists
-	ct := getContract(*req.ContractIdentifier)
-	if ct == nil {
+	contract := getContract(*req.ContractIdentifier)
+	if contract == nil {
 		// idk what we would do for a bad contract, so say the user is banned
 		// there isnt really a good way to deal with this
 		banned = true
@@ -340,8 +340,8 @@ func (egg *eggstore) queryCoop(req *ei.QueryCoopRequest) *ei.QueryCoopResponse {
 	}
 
 	// check if it is full
-	if ct.MaxCoopSize != nil {
-		if egg.countMembersInGroup(*req.ContractIdentifier) >= int(*ct.MaxCoopSize) {
+	if contract.MaxCoopSize != nil {
+		if egg.countMembersInGroup(*req.ContractIdentifier) >= int(*contract.MaxCoopSize) {
 			full = true
 		}
 	}
@@ -368,6 +368,13 @@ func (egg *eggstore) createCoop(req *ei.CreateCoopRequest) *ei.CreateCoopRespons
 			}
 		}()
 	*/
+
+	if ncrr := egg.checkUsernameContract(req); ncrr != nil {
+		// this was a username change request, leave
+		// the return values will be handled by the function
+		//failed = "username change request"
+		return ncrr
+	}
 
 	if req.CoopIdentifier == nil {
 		//failed = "no coop identifier"
@@ -516,7 +523,13 @@ func (egg *eggstore) coopStatus(req *ei.ContractCoopStatusRequest) *ei.ContractC
 		} else {
 			contr.UserId = &member.PrivacyId
 		}
-		contr.UserName = &member.DisplayName
+
+		customname, exists := egg.usernames.Load(member.Deviceid)
+		if exists {
+			contr.UserName = &customname
+		} else {
+			contr.UserName = &member.DisplayName
+		}
 
 		active := false
 		if !(stamp-member.Lastvisit >= 86400) {
@@ -668,6 +681,12 @@ func (egg *eggstore) joinCoop(req *ei.JoinCoopRequest) *ei.JoinCoopResponse {
 		return &resp
 	}
 
+	if isUsernameChangeContract(*req.ContractIdentifier) {
+		//failed = "this is a name change event, reject actual join"
+		message = "You may now return 1" // does not show up
+		return &resp
+	}
+
 	// check if coop group exists
 	lobby, exists := egg.coopgames.LockedLoad(*req.CoopIdentifier)
 	if !exists {
@@ -773,6 +792,12 @@ func (egg *eggstore) autoJoinCoop(req *ei.AutoJoinCoopRequest) *ei.JoinCoopRespo
 	if !isValidDisplayName(*req.UserName) {
 		//failed = "bad username"
 		message = "Invalid Username"
+		return &resp
+	}
+
+	if isUsernameChangeContract(*req.ContractIdentifier) {
+		//failed = "this is a name change event, reject actual join"
+		message = "You may now return 2" // does not show up
 		return &resp
 	}
 

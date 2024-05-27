@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 
 	ei "biehdc.reegg/eggpb"
@@ -21,6 +22,7 @@ type eggstore struct {
 	members   *lockmap.LockMap[string, []usermemberinfo]
 	coopgames *lockmap.LockMap[string, contractGame]
 	coopgifts *lockmap.LockMap[string, []*ei.ContractCoopStatusResponse_CoopGift]
+	usernames syncmap.Map[string, string] // deviceid:username
 }
 
 func newEggstore(motd, workingpath string) *eggstore {
@@ -180,3 +182,90 @@ func (egg *eggstore) path_user_data_info(decoded []byte) []byte {
 	}
 	return resp
 }
+
+var changeNameContractIdentifier = "change-your-name-contract"
+
+func isUsernameChangeContract(contractidentifier string) bool {
+	if contractidentifier == changeNameContractIdentifier {
+		return true
+	}
+	return false
+}
+
+func (egg *eggstore) checkUsernameContract(req *ei.CreateCoopRequest) *ei.CreateCoopResponse {
+	if *req.ContractIdentifier != changeNameContractIdentifier {
+		// none of our business
+		return nil
+	}
+	var (
+		success = false
+		message = "Error"
+	)
+	resp := ei.CreateCoopResponse{
+		Success: &success,
+		Message: &message,
+	}
+
+	name := *req.CoopIdentifier
+	//log.Printf("Device is %s wants to change name to %q", *req.UserId, name)
+
+	if !isValidDisplayName(name) {
+		// the client will not allow the input of invalid names
+		success = false
+		message = "Invalid Name. Try again."
+		return &resp
+	}
+
+	egg.usernames.Store(*req.UserId, name)
+
+	//log.Printf("Device %s is now known as %q", *req.UserId, name)
+
+	success = true
+	message = fmt.Sprintf("Changed your name to %s", name)
+	return &resp
+}
+
+// Contract to start a namechange event
+var namechangecontract *ei.Contract = func() *ei.Contract {
+	var (
+		name    = "Change your Display Name"
+		desc    = "How to: Start contract. Join Coop as the name you want. Select to create the Coop. After the success message exit the contract. You have now set your name!! You set it anytime again. Will be wiped on server reboots." // max len is about 250 chars
+		egg_    = ei.Egg_EDIBLE
+		lensecs = 5964900.0  // a bit more than 69 days
+		exptime = 36374400.0 //almost 421 days
+	)
+	var (
+		goal      = ei.GoalType_EGGS_LAID
+		rwtype1   = ei.RewardType_CASH
+		rwamount1 = 1.0
+		// should be insane enough
+		delamount1 = 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999.0
+	)
+	var (
+		coopallowed = true      // so we can join a coop
+		maxcoop     = uint32(1) // but with only one player (us)
+	)
+	firstcontract := ei.Contract{
+		Identifier:     &changeNameContractIdentifier,
+		Name:           &name,
+		Description:    &desc,
+		LengthSeconds:  &lensecs,
+		Egg:            &egg_,
+		ExpirationTime: &exptime,
+		CoopAllowed:    &coopallowed,
+		MaxCoopSize:    &maxcoop,
+		GoalSets: []*ei.Contract_GoalSet{
+			{
+				Goals: []*ei.Contract_Goal{
+					{
+						Type:         &goal,
+						RewardType:   &rwtype1,
+						RewardAmount: &rwamount1,
+						TargetAmount: &delamount1,
+					},
+				},
+			},
+		},
+	}
+	return &firstcontract
+}()

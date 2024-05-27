@@ -2,9 +2,9 @@ package main
 
 import (
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"log"
-	"math"
 	"time"
 
 	ei "biehdc.reegg/eggpb"
@@ -147,21 +147,17 @@ var permacontractCoop *ei.Contract = func() *ei.Contract {
 	return &firstcontract
 }()
 
-const _7days = float64(604800) // seconds
-const _4days = float64(345600) // seconds
 var (
-	ALL_SOLO_CONTRACTS = false // keeping around in case we unset it again
-	contractEpoch      = 1714867200
-	legacy             []*ei.Contract
-	normal             []*ei.Contract
-	permanent          []*ei.Contract
+	legacyRead  []*ei.Contract
+	legacyWrite []*ei.Contract
+	permanent   []*ei.Contract
 )
 
 func getContract(identifier string) *ei.Contract {
 	if *permacontractCoop.Identifier == identifier {
 		return permacontractCoop
 	}
-	for _, ct := range legacy {
+	for _, ct := range legacyRead {
 		if *ct.Identifier == identifier {
 			return ct
 		}
@@ -169,80 +165,103 @@ func getContract(identifier string) *ei.Contract {
 	return nil
 }
 
-//go:embed contracts_go.json
+//go:embed contracts.json
 var contracts_json []byte
 
 func generateContracts(workingpath string) {
-	var contracts []*ei.Contract
-	// lets hope this works
-	err := json.Unmarshal(contracts_json, &contracts)
+	type upstream struct {
+		Id    string `json:"id"`
+		Proto string `json:"proto"`
+	}
+
+	// parse all the entries of the og file into an array
+	var data []upstream
+	err := json.Unmarshal(contracts_json, &data)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	permanent = []*ei.Contract{permacontract, permacontractCoop}
-
-	const scaler = float64(1.0)
-	tmpbool := false
-	for i, ct := range contracts {
-		// do some modifications
-		if ALL_SOLO_CONTRACTS {
-			ct.CoopAllowed = &tmpbool
-			// op comment:
-			// Not all contracts are made equal. If we divide it at an absolute, it becomes too easy
-			// Still need to pinpoint the ratio based on experience.
-			if ct.MaxCoopSize != nil {
-				scalefactor := float64(*ct.MaxCoopSize) * 0.35
-				if scalefactor > 1.0 {
-					scalefactor = 1.0
-				}
-				for _, gs := range ct.GoalSets {
-					for _, goal := range gs.Goals {
-						*goal.TargetAmount = *goal.TargetAmount * scalefactor
-					}
-				}
-			}
+	// decode the protobuf messages into proper structs
+	for _, contract := range data {
+		cnt, err := base64.StdEncoding.DecodeString(contract.Proto)
+		if err != nil {
+			log.Panic(err)
 		}
-		// add to places
-		exp := float64((_7days * float64(i+1)) - float64(contractEpoch))
-		ct.ExpirationTime = &exp
-		legacy = append(legacy, ct)
+
+		// we do it once for reading from
+		var protoRead ei.Contract
+		err = proto.Unmarshal(cnt, &protoRead)
+		if err != nil {
+			log.Panic(err)
+		}
+		legacyRead = append(legacyRead, &protoRead)
+
+		// and we need this one to write to for dispatch
+		var protodWrite ei.Contract
+		err = proto.Unmarshal(cnt, &protodWrite)
+		if err != nil {
+			log.Panic(err)
+		}
+		legacyWrite = append(legacyWrite, &protodWrite)
 	}
 
-	log.Printf("Loaded %d \"Leggacy\" contracts, %d to-schedule contracts", len(legacy), len(normal))
+	permanent = []*ei.Contract{namechangecontract, permacontract, permacontractCoop}
+
+	//log.Printf("Loaded %d \"Leggacy\" contracts, %d to-schedule contracts", len(legacyRead), len(normal))
+	log.Printf("Loaded %d contracts", len(legacyRead))
 }
 
 func (egg *eggstore) updateContracts(t time.Time) []*ei.Contract {
-	//fixme: TODO: Shift the epoch when a full run of leggacys is done.
-
 	var activecontracts []*ei.Contract
 	activecontracts = permanent
+	cmon, cday := t.Month(), t.Day()
 
-	timesinceepoch := t.Unix() - int64(contractEpoch)
-	for ii, ct := range legacy {
-		i := ii + 1
+	const (
+		q0 = 0
+		q1 = 8
+		q2 = 16
+		q3 = 24
+		q4 = 32
+	)
 
-		var factor1 float64
-		factor1 = _7days * math.Ceil(float64(i)/2.0)
+	var lower, upper int
+	switch {
+	case cday >= q0 && cday < q1:
+		lower = q0
+		upper = q1
+	case cday >= q1 && cday < q2:
+		lower = q1
+		upper = q2
+	case cday >= q2 && cday < q3:
+		lower = q2
+		upper = q3
+	case cday >= q3 && cday < q4:
+		lower = q3
+		upper = q4
+	}
 
-		var factor2 float64
-		if i%2 != 0 {
-			factor2 = _4days
+	// this is nether accurate to the original nor really correct
+	// but it is good enough for myself and makes a constant feed
+	// of new contracts for players
+	for ii, ctread := range legacyRead {
+		cttime := time.Unix(int64(*ctread.ExpirationTime), 0)
+		if cttime.Month() != cmon {
+			//log.Printf("ignoring %s, wrong month %d", *ctread.Identifier, cttime.Month())
+			continue // wrong month
 		}
-		expirytime := factor1 + factor2 - float64(timesinceepoch)
 
-		if expirytime < 0 {
-			// its expired, get next one
-			continue
+		if cttime.Day() > lower && cttime.Day() < upper {
+			ct := legacyWrite[ii]
+			exp := float64(upper-cday) * 24 * 60 * 60
+			ct.ExpirationTime = &exp
+			activecontracts = append(activecontracts, ct)
+
+			//log.Printf("have contract %s", *ct.Identifier)
+			//log.Printf("expires at %f", exp)
+		} else {
+			//log.Printf("ignoring %s, wrong day %d", *ctread.Identifier, cttime.Day())
+			continue // wrong day area
 		}
-
-		if expirytime > _7days {
-			// its next weeks contract, dont process more
-			break
-		}
-
-		ct.ExpirationTime = &expirytime
-		activecontracts = append(activecontracts, ct)
 	}
 
 	return activecontracts

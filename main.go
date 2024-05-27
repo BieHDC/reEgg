@@ -8,11 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -34,21 +32,18 @@ func wrapHandleFunc(whf wrappedHandleFunc) http.HandlerFunc {
 	}
 }
 
-// fixme should be removed when deployed due to spam
+// removed on release due to logspam
 // but useful for devving to not miss anything
 func printUnhandled(w http.ResponseWriter, req *http.Request) error {
-	dump, err := httputil.DumpRequest(req, true)
-	if err != nil {
-		log.Printf("failed to dump request: %s", err)
-		return errors.New("bad request")
-	}
-	log.Printf("Unhandled Request:\n%s\nEND Unhandled Request", strings.TrimSpace(string(dump)))
-
+	/*
+		dump, err := httputil.DumpRequest(req, true)
+		if err != nil {
+			log.Printf("failed to dump request: %s", err)
+			return errors.New("bad request")
+		}
+		log.Printf("Unhandled Request:\n%s\nEND Unhandled Request", strings.TrimSpace(string(dump)))
+	*/
 	return errors.New("Whatever you requested is unhandled right now")
-}
-
-type Config struct {
-	Motd string
 }
 
 var (
@@ -71,9 +66,9 @@ func main() {
 	// Analytics
 	mux.HandleFunc("POST /ei_data/{subpath...}", wrapHandleFunc(egg.handlepath_eidata))
 	// Redirect a pure call to "/" to the Landing Page
-	mux.HandleFunc("/{$}", redirect)
+	mux.HandleFunc("GET /{$}", redirect)
 	// Landing Pages
-	mux.HandleFunc("/stat", egg.index)
+	mux.HandleFunc("GET /info", egg.index(config.AdminContact))
 	mux.HandleFunc("GET /favicon.ico", getico)
 	mux.HandleFunc("GET /privacy", redirect) // the in app privacy button takes us here, forward it
 	// Catch-all the rest
@@ -115,6 +110,11 @@ func main() {
 	egg.Shutdown()
 }
 
+type Config struct {
+	Motd         string
+	AdminContact string
+}
+
 func loadConfig(userdir string) (Config, string) {
 	fullpath, err := filepath.Abs(userdir)
 	if err != nil {
@@ -139,7 +139,8 @@ func loadConfig(userdir string) (Config, string) {
 				log.Panic(err)
 			}
 			emptyconfig := Config{
-				Motd: "WELCOME TO reEgg-go!!\nA custom server!!",
+				Motd:         "WELCOME TO reEgg-go!!\nA custom server!!\ngithub.com/BieHDC/reEgg",
+				AdminContact: "https://github.com/BieHDC/reEgg",
 			}
 			encoder := json.NewEncoder(serversettingsfile)
 			encoder.SetIndent("", "\t")

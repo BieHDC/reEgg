@@ -1,67 +1,13 @@
 package main
 
 import (
-	"cmp"
 	"fmt"
-	"html"
 	"io"
 	"net/http"
-	"slices"
-
-	ei "biehdc.reegg/eggpb"
 )
 
-type userinfo struct {
-	Devicename string
-	Eggs       float64
-}
-
-func parseUserinfo(b *ei.Backup) userinfo {
-	ui := userinfo{
-		Devicename: "unknown name",
-		Eggs:       0.0,
-	}
-
-	if b.UserName != nil {
-		ui.Devicename = *b.UserName
-	}
-
-	if b.Stats == nil {
-		return ui
-	}
-	if b.Stats.EggTotals == nil {
-		return ui
-	}
-
-	for _, eggs := range b.Stats.EggTotals {
-		ui.Eggs += eggs
-	}
-
-	return ui
-}
-
-// fixme very naive leaderboard
-func (egg *eggstore) index(w http.ResponseWriter, req *http.Request) {
-	io.WriteString(w, prehtml)
-
-	var uis []userinfo
-	egg.users.Range(func(_ string, b *ei.Backup) bool {
-		uis = append(uis, parseUserinfo(b))
-		return true // keep going
-	})
-
-	slices.SortFunc(uis, func(a, b userinfo) int {
-		return cmp.Compare(b.Eggs, a.Eggs)
-	})
-
-	for _, ui := range uis {
-		io.WriteString(w, fmt.Sprintf(data, html.EscapeString(ui.Devicename), ui.Eggs))
-	}
-	io.WriteString(w, posthtml)
-}
-
 func redirect(w http.ResponseWriter, req *http.Request) {
-	http.Redirect(w, req, "stat", http.StatusMovedPermanently)
+	http.Redirect(w, req, "info", http.StatusMovedPermanently)
 }
 
 // bluntly returns a raw ico file, as expected
@@ -69,23 +15,35 @@ func getico(w http.ResponseWriter, _ *http.Request) {
 	w.Write(icobytes)
 }
 
-var prehtml = `
+func (egg *eggstore) index(admincontact string) http.HandlerFunc {
+	resp := fmt.Sprintf("%s%s%s", data1, fmt.Sprintf(data2, admincontact), data3)
+	return func(w http.ResponseWriter, req *http.Request) {
+		io.WriteString(w, resp)
+	}
+}
+
+var data1 = `
 <html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta http-equiv="X-UA-Compatible" content="ie=edge" />
-<title>Leaderboard</title>
+<meta property="og:title" content="reEgg Server">
+<meta property="og:description" content="This server hosts an instance of github.com/BieHDC/reEgg, a reimplementation of the Egg Inc. Server.">
+<title>reEgg Server</title>
 <style>
 html, body {
   height: 100%;
+  max-width:1024px;
+  margin:1em auto;
+  padding:0 0.5em;
+  font-size:large;
 }
 
 html {
   display: table;
   margin: auto;
   font-family: Arial, Helvetica, sans-serif;
-  max-width: 80%;
 }
 
 body {
@@ -95,36 +53,34 @@ body {
   background-repeat: no-repeat;
   background-size: 100% 100%;
 }
-table {
-	padding: 5px;
-	text-align: left;
-	border: 3px solid rgb(255, 255, 255, .25);
-}
-
-th, td {
-	padding: 5px;
-	font-size: 1vw;
-	border: 3px solid rgb(255, 255, 255, .25);
-}
 </style>
 </head>
-<body><h1>Active Users:</h1>
-<table>
-<tr>
-	<th>Username</th>
-	<th>Eggs Total</th>
-</tr>
+<body>
+<h1>Good Morning!</h1>
+<p>This server hosts an instance of <a href="https://github.com/BieHDC/reEgg">reEgg</a>, a reimplementation of the Egg Inc. Server.</p>
 `
 
-var data = `
-<tr>
-<td>%s</td>
-<td>%.0f</td>
-</tr>
-`
+var data2 = "<p>Contact the <a href=\"%s\">System Administrator</a>.</p>"
 
-var posthtml = `
-</table>
+var data3 = `
+<h1>Privacy Policy</h1>
+<p>The server software itself stores your ingame backup if you have it enabled in your game and metadata for coop gaming if you join one. Your device id uniquely identfies you there but with no further data attached, hence you can restore from a backup on the server if you wiped your local backup. The ingame "delete my data" button does nothing as it seems the developers did not wire up the button to an action, so if you would like to have your data wiped you have to contact the server administrator.</p>
+<h1>Changing your Display Name ingame</h1>
+<p>Click on the Egg icon top left.</p>
+<p>Click on "Contracts"</p>
+<p>Start the "Change your Display Name" contract.</p>
+<p>Click the Egg icon on the top left again.</p>
+<p>Click "Join Co-op" and type in the Display Name you would like to get and hit "Submit".</p>
+<p>When prompted with "Co-op does not exist. Would you like to create it?" answer with "Create".</p>
+<p>After the game tells you "Successfully created Co-op" click "Ok".</p>
+<p>Click on "Contracts"</p>
+<p>View details of the "Change your Display Name" contract.</p>
+<p>Click "Exit Contract" and confirm with "Yes" to go back.</p>
+<p>Now you have changed your Display Name for Coop Sessions.</p>
+<p>You can change it anytime again by just repeating this process.</p>
+<h2>Details</h2>
+<p>The server is not going to save Display Names across server reboots.</p>
+<p>On why we do this dance: this is because on older Android it would get the device name through the api, on newer Android this seems to be blocked somehow. We dont have a random arbitrary input box we can send to the server, so we are making use of the Coop session input box. I wanted to keep everything in-app without any outside account management platform.</p>
 </body></html>
 `
 
